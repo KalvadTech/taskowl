@@ -1,4 +1,4 @@
-.PHONY: help install api mcp test lint lint-fix typecheck check migrate migrate-create clean
+.PHONY: help install api test lint lint-fix typecheck check migrate migrate-create clean
 
 help: ## Show this help message
 	@echo "Available commands:"
@@ -9,9 +9,6 @@ install: ## Install dependencies
 
 api: ## Run FastAPI server
 	uv run taskowl
-
-mcp: ## Run MCP server (stdio transport)
-	uv run taskowl --mcp-only
 
 test: ## Run tests
 	uv run pytest tests/ -v

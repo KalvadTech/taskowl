@@ -1,18 +1,16 @@
 """Main entry point for taskowl."""
 
-import asyncio
-import contextlib
 import logging
-import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
+from starlette.applications import Starlette
 
 from taskowl.config import settings
 from taskowl.database import close_db, init_db
-from taskowl.mcp.server import run_mcp_server
+from taskowl.mcp.server import build_mcp_app
 
 # Configure logging
 logging.basicConfig(
@@ -29,20 +27,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await init_db()
     logger.info("Database initialized")
 
-    # Start MCP server in background if enabled
-    mcp_task = None
-    if settings.mcp_enabled:
-        mcp_task = asyncio.create_task(run_mcp_server())
-        logger.info("MCP server started")
-
     yield
 
     # Cleanup
     logger.info("Shutting down taskowl...")
-    if mcp_task:
-        mcp_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await mcp_task
     await close_db()
     logger.info("Shutdown complete")
 
@@ -72,14 +60,13 @@ async def root() -> dict[str, str]:
     }
 
 
+# Mount MCP application at /mcp
+mcp_app: Starlette = build_mcp_app()
+app.mount("/mcp", mcp_app)
+
+
 def main() -> None:
     """Main entry point."""
-    # Check if running in MCP-only mode
-    if "--mcp-only" in sys.argv:
-        logger.info("Running in MCP-only mode")
-        asyncio.run(run_mcp_server())
-        return
-
     # Run FastAPI server
     logger.info(f"Starting FastAPI server on {settings.taskowl_host}:{settings.taskowl_port}")
     uvicorn.run(

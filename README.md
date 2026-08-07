@@ -28,37 +28,34 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Clone and install
 git clone https://github.com/yourusername/taskowl.git
 cd taskowl
-uv sync
+make install
 
 # Set environment variables
 export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/taskowl"
 export CELERY_BROKER_URL="amqp://guest:guest@localhost:5672//"
 
 # Run database migrations
-uv run alembic upgrade head
+make migrate
 
 # Start the server
-uv run taskowl
+make api
 ```
 
 ### MCP Usage
 
-Connect your LLM to the MCP server:
+The MCP server is available at `/mcp` endpoint. Configure your MCP client:
 
-```python
-# In Claude Desktop config
+```json
 {
-    "mcpServers": {
-        "taskowl": {
-            "command": "uv",
-            "args": ["run", "taskowl", "--mcp-only"],
-            "env": {"DATABASE_URL": "postgresql+asyncpg://...", "CELERY_BROKER_URL": "amqp://..."},
-        }
+  "mcpServers": {
+    "taskowl": {
+      "url": "http://localhost:8000/mcp"
     }
+  }
 }
 ```
 
-Then ask Claude:
+Then ask your LLM:
 - "Show me the last 10 failed tasks"
 - "What's the average task runtime in the last hour?"
 - "Which workers are currently online?"
@@ -103,9 +100,6 @@ All configuration is via environment variables:
 | `TASKOWL_HOST` | FastAPI server host | `0.0.0.0` | No |
 | `TASKOWL_PORT` | FastAPI server port | `8000` | No |
 | `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` | No |
-| `MCP_ENABLED` | Enable MCP server | `true` | No |
-| `MCP_HOST` | MCP server host | `0.0.0.0` | No |
-| `MCP_PORT` | MCP server port | `8001` | No |
 
 ## MCP Tools
 
@@ -158,32 +152,26 @@ Get status of all Celery workers.
 Which workers are online?
 ```
 
-### get_queue_stats
-
-Get queue statistics (length, consumer count).
-
-**Example:**
-```
-How many tasks are in the queue?
-```
-
 ## Development
 
 ### Setup
 
 ```bash
 # Install dependencies
-uv sync --dev
+make install
 
 # Run tests
-uv run pytest
+make test
 
 # Lint
-uv run ruff check .
-uv run ruff format .
+make lint
+make lint-fix
 
 # Type check
-uv run mypy src/
+make typecheck
+
+# Run all checks
+make check
 ```
 
 ### Running Locally
@@ -196,10 +184,10 @@ export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/tasko
 export CELERY_BROKER_URL="amqp://guest:guest@localhost:5672//"
 
 # Run migrations
-uv run alembic upgrade head
+make migrate
 
 # Start the server
-uv run taskowl
+make api
 ```
 
 ### Project Structure
@@ -230,9 +218,9 @@ taskowl/
 | id | UUID | Task ID (primary key) |
 | name | VARCHAR(255) | Task name |
 | state | VARCHAR(50) | Task state (PENDING, STARTED, SUCCESS, FAILURE, RETRY, REVOKED) |
-| args | JSONB | Task arguments |
-| kwargs | JSONB | Task keyword arguments |
-| result | JSONB | Task result |
+| args | JSON | Task arguments |
+| kwargs | JSON | Task keyword arguments |
+| result | JSON | Task result |
 | traceback | TEXT | Error traceback (if failed) |
 | worker | VARCHAR(255) | Worker hostname |
 | queue | VARCHAR(255) | Queue name |
@@ -251,7 +239,7 @@ taskowl/
 | pool_size | INT | Worker pool size |
 | active_count | INT | Number of active tasks |
 | processed_count | BIGINT | Total tasks processed |
-| loadavg | FLOAT[] | System load average |
+| loadavg | JSON | System load average |
 | last_heartbeat | TIMESTAMP | Last heartbeat timestamp |
 | created_at | TIMESTAMP | When worker was first seen |
 | updated_at | TIMESTAMP | When worker was last updated |

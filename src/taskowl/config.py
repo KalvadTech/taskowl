@@ -25,18 +25,6 @@ class Settings(BaseSettings):
         default="INFO",
         description="Logging level (DEBUG, INFO, WARNING, ERROR)",
     )
-    mcp_enabled: bool = Field(
-        default=True,
-        description="Enable MCP server",
-    )
-    mcp_host: str = Field(
-        default="0.0.0.0",
-        description="MCP server host",
-    )
-    mcp_port: int = Field(
-        default=8001,
-        description="MCP server port",
-    )
 
     model_config = {"env_prefix": "", "case_sensitive": False}
 
