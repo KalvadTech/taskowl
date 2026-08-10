@@ -6,91 +6,123 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import select
 
-from taskowl.models import Task, Worker
+from taskowl.models import TaskEvent, WorkerEvent
 
 
 @pytest.mark.asyncio
-async def test_create_task(db_session):
-    """Test creating a task."""
-    task = Task(
-        id=uuid.uuid4(),
+async def test_create_task_event(db_session):
+    """Test creating a task event."""
+    task_id = uuid.uuid4()
+    event = TaskEvent(
+        event_type="received",
+        task_id=task_id,
+        timestamp=datetime.now(UTC),
+        hostname="worker1@localhost",
         name="test_task",
-        state="PENDING",
         args={"arg1": "value1"},
         kwargs={"kwarg1": "value2"},
         queue="default",
     )
-    db_session.add(task)
+    db_session.add(event)
     await db_session.commit()
 
-    # Query the task
-    result = await db_session.execute(select(Task).where(Task.id == task.id))
-    retrieved_task = result.scalar_one()
+    # Query the event
+    result = await db_session.execute(select(TaskEvent).where(TaskEvent.task_id == task_id))
+    retrieved_event = result.scalar_one()
 
-    assert retrieved_task.name == "test_task"
-    assert retrieved_task.state == "PENDING"
-    assert retrieved_task.args == {"arg1": "value1"}
-    assert retrieved_task.kwargs == {"kwarg1": "value2"}
-    assert retrieved_task.queue == "default"
-    assert retrieved_task.created_at is not None
+    assert retrieved_event.event_type == "received"
+    assert retrieved_event.task_id == task_id
+    assert retrieved_event.name == "test_task"
+    assert retrieved_event.hostname == "worker1@localhost"
+    assert retrieved_event.args == {"arg1": "value1"}
+    assert retrieved_event.kwargs == {"kwarg1": "value2"}
+    assert retrieved_event.queue == "default"
+    assert retrieved_event.created_at is not None
 
 
 @pytest.mark.asyncio
-async def test_create_worker(db_session):
-    """Test creating a worker."""
-    worker = Worker(
+async def test_create_worker_event(db_session):
+    """Test creating a worker event."""
+    event = WorkerEvent(
+        event_type="heartbeat",
         hostname="worker1@localhost",
-        status="online",
-        pool_size=4,
-        active_count=2,
-        processed_count=100,
-        loadavg=[1.5, 2.0, 1.8],
+        timestamp=datetime.now(UTC),
+        active=2,
+        processed=100,
+        freq=2.0,
+        sw_ident="py-celery",
+        sw_ver="5.6.3",
+        sw_sys="Linux",
     )
-    db_session.add(worker)
+    db_session.add(event)
     await db_session.commit()
 
-    # Query the worker
-    result = await db_session.execute(select(Worker).where(Worker.hostname == worker.hostname))
-    retrieved_worker = result.scalar_one()
+    # Query the event
+    result = await db_session.execute(
+        select(WorkerEvent).where(WorkerEvent.hostname == event.hostname)
+    )
+    retrieved_event = result.scalar_one()
 
-    assert retrieved_worker.hostname == "worker1@localhost"
-    assert retrieved_worker.status == "online"
-    assert retrieved_worker.pool_size == 4
-    assert retrieved_worker.active_count == 2
-    assert retrieved_worker.processed_count == 100
-    assert retrieved_worker.loadavg == [1.5, 2.0, 1.8]
+    assert retrieved_event.event_type == "heartbeat"
+    assert retrieved_event.hostname == "worker1@localhost"
+    assert retrieved_event.active == 2
+    assert retrieved_event.processed == 100
+    assert retrieved_event.freq == 2.0
+    assert retrieved_event.sw_ident == "py-celery"
+    assert retrieved_event.sw_ver == "5.6.3"
+    assert retrieved_event.sw_sys == "Linux"
 
 
 @pytest.mark.asyncio
-async def test_task_state_transitions(db_session):
-    """Test task state transitions."""
+async def test_task_event_timeline(db_session):
+    """Test creating multiple events for a task (timeline)."""
     task_id = uuid.uuid4()
-    task = Task(
-        id=task_id,
+    now = datetime.now(UTC)
+
+    # Create received event
+    event1 = TaskEvent(
+        event_type="received",
+        task_id=task_id,
+        timestamp=now,
+        hostname="worker1@localhost",
         name="test_task",
-        state="PENDING",
     )
-    db_session.add(task)
+    db_session.add(event1)
     await db_session.commit()
 
-    # Update to STARTED
-    task.state = "STARTED"
-    task.started_at = datetime.now(UTC)
+    # Create started event
+    event2 = TaskEvent(
+        event_type="started",
+        task_id=task_id,
+        timestamp=now.replace(microsecond=now.microsecond + 1000),
+        hostname="worker1@localhost",
+        pid=12345,
+    )
+    db_session.add(event2)
     await db_session.commit()
 
-    result = await db_session.execute(select(Task).where(Task.id == task_id))
-    updated_task = result.scalar_one()
-    assert updated_task.state == "STARTED"
-    assert updated_task.started_at is not None
-
-    # Update to SUCCESS
-    task.state = "SUCCESS"
-    task.finished_at = datetime.now(UTC)
-    task.runtime = 1.5
+    # Create succeeded event
+    event3 = TaskEvent(
+        event_type="succeeded",
+        task_id=task_id,
+        timestamp=now.replace(microsecond=now.microsecond + 2000),
+        hostname="worker1@localhost",
+        runtime=1.5,
+        result={"status": "ok"},
+    )
+    db_session.add(event3)
     await db_session.commit()
 
-    result = await db_session.execute(select(Task).where(Task.id == task_id))
-    final_task = result.scalar_one()
-    assert final_task.state == "SUCCESS"
-    assert final_task.finished_at is not None
-    assert final_task.runtime == 1.5
+    # Query all events for this task
+    result = await db_session.execute(
+        select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.timestamp)
+    )
+    events = result.scalars().all()
+
+    assert len(events) == 3
+    assert events[0].event_type == "received"
+    assert events[1].event_type == "started"
+    assert events[1].pid == 12345
+    assert events[2].event_type == "succeeded"
+    assert events[2].runtime == 1.5
+    assert events[2].result == {"status": "ok"}

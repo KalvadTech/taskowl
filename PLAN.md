@@ -27,21 +27,35 @@
          │ Consume events
          ▼
 ┌─────────────────┐
-│  FastAPI        │
-│  Backend        │
-│  - Event consumer
-│  - REST API
-│  - MCP server (HTTP at /mcp)
+│  taskowl        │
+│  consumer       │
+│  (separate      │
+│   process)      │
 └────────┬────────┘
          │
-         │ Store task data
+         │ Store events (append-only)
          ▼
 ┌─────────────────┐         ┌─────────────────┐
 │  PostgreSQL     │◄────────│  Shaper         │
-│  (Task history) │         │  (Dashboards)   │
-└─────────────────┘         └─────────────────┘
-         ▲
-         │ Query via MCP (HTTP)
+│  (Event log)    │         │  (Dashboards)   │
+└────────┬────────┘         └─────────────────┘
+         │
+         │ Query
+         ▼
+┌─────────────────┐
+│  FastAPI        │
+│  REST API       │
+│  (port 8000)    │
+└────────┬────────┘
+         │
+         │ HTTP calls
+         ▼
+┌─────────────────┐
+│  MCP Server     │
+│  (port 8001)    │
+└────────┬────────┘
+         │
+         │ MCP protocol
          │
     ┌────┴────┐
     │  LLM    │
@@ -68,48 +82,79 @@
 - [x] Configure ty for type checking
 
 **Deliverables**:
-- Working FastAPI app with MCP endpoint at `/mcp`
+- Working FastAPI app with REST API endpoints
 - Database migrations
-- Four functional MCP tools
+- Five functional MCP tools
 - Basic documentation
 - CI pipeline
 - Makefile for development
 
 **Notes**:
-- MCP server uses HTTP transport (streamable-http) instead of stdio for better compatibility
-- MCP is mounted at `/mcp` endpoint in the FastAPI app
+- MCP server runs as a separate process on port 8001
+- FastAPI serves REST API on port 8000
+- MCP tools call REST API endpoints via HTTP
 - All quality checks pass: ruff, ty, pytest
 
-### Phase 2: Celery Event Consumer
-**Goal**: Capture real-time Celery events and store in database
+### Phase 2: Celery Event Consumer ✅ COMPLETE
+**Goal**: Capture real-time Celery events and store in database using event sourcing
 
 **Tasks**:
-- [ ] Implement Celery event consumer using `celery.events.EventReceiver`
-- [ ] Map Celery events to database models
-- [ ] Handle worker events (worker-online, worker-offline, worker-heartbeat)
-- [ ] Test event consumption with sample Celery app
-- [ ] Add error handling and reconnection logic
+- [x] Implement Celery event consumer using `celery.events.EventReceiver`
+- [x] Map Celery events to database models (event sourcing approach)
+- [x] Handle task events (sent, received, started, succeeded, failed, revoked, retried, rejected)
+- [x] Handle worker events (worker-online, worker-offline, worker-heartbeat)
+- [x] Create separate consumer process with CLI (`taskowl-consume`)
+- [x] Add error handling and reconnection logic
+- [x] Update MCP tools to reconstruct state from events
+- [x] Add `get_task_timeline` MCP tool for timeline visualization
+- [x] Create database migration for event tables
+- [x] Test event handlers and state reconstruction
 
 **Deliverables**:
-- Real-time event ingestion
-- Automatic task state updates
-- Worker heartbeat tracking
+- Separate consumer process (`taskowl-consume`)
+- Append-only event log (task_events, worker_events tables)
+- Event handlers for all Celery event types
+- State reconstruction in MCP tools
+- Timeline visualization capability
+- Complete audit trail
+- Test data generator script for validation
 
-### Phase 3: Complete MCP Tools ✅ COMPLETE
-**Goal**: Full read-only monitoring capabilities
+**Notes**:
+- Event sourcing approach: no UPDATE operations, only INSERT
+- State is reconstructed from latest events using DISTINCT ON queries
+- Complete timeline available for each task
+- Better for debugging and analysis than traditional state tables
+- Test data generator publishes realistic events to RabbitMQ for end-to-end testing
+
+### Phase 3: REST API & MCP Refactoring ✅ COMPLETE
+**Goal**: Separate concerns - REST API for data access, MCP as a thin wrapper
 
 **Tasks**:
-- [x] Implement `list_tasks` - retrieve tasks with filters
-- [x] Implement `get_task` - retrieve task details
-- [x] Implement `get_task_summary` - aggregate statistics
-- [x] Implement `get_worker_status` - worker health
-- [x] Add filtering capabilities to `list_tasks`
-- [x] Test all MCP tools
+- [x] Extract query logic into reusable functions (`queries.py`)
+- [x] Implement REST API endpoints in FastAPI:
+  - `GET /api/tasks` - list tasks with filters
+  - `GET /api/tasks/{task_id}` - get task details
+  - `GET /api/tasks/{task_id}/timeline` - get task timeline
+  - `GET /api/tasks/summary` - get aggregate statistics
+  - `GET /api/workers` - get worker status
+- [x] Refactor MCP tools to call REST API endpoints via HTTP
+- [x] Add Pydantic models for API responses
+- [x] Update documentation with REST API reference
+- [x] Test all MCP tools with new architecture
 
 **Deliverables**:
-- Complete MCP server with 4 tools
-- All monitoring tools functional
-- Ready for LLM integration
+- REST API with 5 endpoints
+- MCP tools that call REST API
+- Separation of concerns (API handles data, MCP is thin wrapper)
+- Updated documentation
+- All quality checks pass
+
+**Notes**:
+- REST API runs on port 8000 (FastAPI)
+- MCP server runs on port 8001 (separate process)
+- MCP tools use httpx to call REST API
+- Other clients can now use the REST API directly
+- Better testability and maintainability
 
 ### Phase 4: Shaper Integration & Docs
 **Goal**: Enable dashboard creation and comprehensive documentation
@@ -140,51 +185,72 @@
 
 ### Database Schema
 
-#### Tasks Table
+taskowl uses an **event sourcing** architecture. Instead of storing current state, we store every event that happens. This gives us:
+- Complete audit trail
+- Ability to reconstruct state at any point in time
+- Task timelines showing the full execution flow
+- Better debugging and analysis capabilities
+
+#### task_events Table
 ```sql
-CREATE TABLE tasks (
-    id UUID PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    state VARCHAR(50) NOT NULL,  -- PENDING, STARTED, SUCCESS, FAILURE, RETRY, REVOKED
+CREATE TABLE task_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type VARCHAR(50) NOT NULL,  -- sent, received, started, succeeded, failed, revoked, retried, rejected
+    task_id UUID NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    hostname VARCHAR(255),
+    name VARCHAR(255),
     args JSON,
     kwargs JSON,
     result JSON,
+    exception TEXT,
     traceback TEXT,
-    worker VARCHAR(255),
-    queue VARCHAR(255),
-    started_at TIMESTAMP,
-    finished_at TIMESTAMP,
     runtime FLOAT,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    retries INTEGER,
+    eta TIMESTAMP WITH TIME ZONE,
+    expires TIMESTAMP WITH TIME ZONE,
+    queue VARCHAR(255),
+    root_id UUID,
+    parent_id UUID,
+    pid INTEGER,
+    signum INTEGER,
+    terminated BOOLEAN,
+    expired BOOLEAN,
+    requeue BOOLEAN,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Indexes for common queries
-CREATE INDEX idx_tasks_state ON tasks(state);
-CREATE INDEX idx_tasks_name ON tasks(name);
-CREATE INDEX idx_tasks_worker ON tasks(worker);
-CREATE INDEX idx_tasks_created_at ON tasks(created_at DESC);
-CREATE INDEX idx_tasks_finished_at ON tasks(finished_at DESC);
+CREATE INDEX idx_task_events_task_id_timestamp ON task_events(task_id, timestamp);
+CREATE INDEX idx_task_events_event_type_timestamp ON task_events(event_type, timestamp);
+CREATE INDEX idx_task_events_timestamp ON task_events(timestamp);
 ```
 
-#### Workers Table
+#### worker_events Table
 ```sql
-CREATE TABLE workers (
-    hostname VARCHAR(255) PRIMARY KEY,
-    status VARCHAR(50),  -- online, offline
-    pool_size INT,
-    active_count INT,
-    processed_count BIGINT,
-    loadavg JSON,
-    last_heartbeat TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+CREATE TABLE worker_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type VARCHAR(50) NOT NULL,  -- online, heartbeat, offline
+    hostname VARCHAR(255) NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    active INTEGER,
+    processed BIGINT,
+    freq FLOAT,
+    sw_ident VARCHAR(255),
+    sw_ver VARCHAR(255),
+    sw_sys VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Indexes for common queries
+CREATE INDEX idx_worker_events_hostname_timestamp ON worker_events(hostname, timestamp);
+CREATE INDEX idx_worker_events_event_type_timestamp ON worker_events(event_type, timestamp);
+CREATE INDEX idx_worker_events_timestamp ON worker_events(timestamp);
 ```
 
 ### MCP Tools API
 
-The MCP server is exposed via HTTP at `/mcp` using streamable-http transport.
+The MCP server is exposed via HTTP at `/mcp` using streamable-http transport. State is reconstructed from the event log.
 
 #### list_tasks
 ```python
@@ -196,28 +262,37 @@ async def list_tasks(
     since: str | None = None,
     limit: int = 100,
 ) -> list[dict]:
-    """List tasks with optional filters"""
+    """List tasks with optional filters. State reconstructed from latest events."""
 ```
 
 #### get_task
 ```python
 @server.tool(name="get_task", description="Get detailed information about a specific task")
 async def get_task(task_id: str) -> dict:
-    """Get detailed information about a specific task"""
+    """Get detailed information about a specific task, including all events."""
+```
+
+#### get_task_timeline
+```python
+@server.tool(
+    name="get_task_timeline", description="Get chronological timeline of all events for a task"
+)
+async def get_task_timeline(task_id: str) -> list[dict]:
+    """Get all events for a task in chronological order for timeline visualization."""
 ```
 
 #### get_task_summary
 ```python
 @server.tool(name="get_task_summary", description="Get aggregate task statistics")
 async def get_task_summary(hours: int = 1) -> dict:
-    """Get aggregate task statistics"""
+    """Get aggregate task statistics reconstructed from latest events."""
 ```
 
 #### get_worker_status
 ```python
 @server.tool(name="get_worker_status", description="Get status of all Celery workers")
 async def get_worker_status() -> list[dict]:
-    """Get status of all Celery workers"""
+    """Get status of all Celery workers reconstructed from latest events."""
 ```
 
 ### Dependencies
@@ -258,13 +333,15 @@ dev = [
 | `CELERY_BROKER_URL` | RabbitMQ connection string | `amqp://guest:guest@localhost:5672//` | Yes |
 | `TASKOWL_HOST` | FastAPI server host | `0.0.0.0` | No |
 | `TASKOWL_PORT` | FastAPI server port | `8000` | No |
+| `MCP_HOST` | MCP server host | `0.0.0.0` | No |
+| `MCP_PORT` | MCP server port | `8001` | No |
 | `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` | No |
 
 ## Success Criteria
 
-**Phase 1**: ✅ COMPLETE - FastAPI app with MCP endpoint, database migrations, 4 MCP tools
-**Phase 2**: Celery events are captured and stored in real-time
-**Phase 3**: ✅ COMPLETE - All 4 MCP tools implemented and tested
+**Phase 1**: ✅ COMPLETE - FastAPI app with MCP endpoint, database migrations, 5 MCP tools
+**Phase 2**: ✅ COMPLETE - Event consumer with event sourcing, separate process, timeline visualization
+**Phase 3**: ✅ COMPLETE - REST API with 5 endpoints, MCP tools refactored to call REST API
 **Phase 4**: Documentation complete, Shaper dashboards possible
 
 ## Future Enhancements (Post-MVP)

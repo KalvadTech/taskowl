@@ -1,4 +1,4 @@
-.PHONY: help install api test lint lint-fix typecheck check migrate migrate-create clean
+.PHONY: help install api consume mcp test lint lint-fix typecheck check migrate migrate-create clean
 
 help: ## Show this help message
 	@echo "Available commands:"
@@ -9,6 +9,12 @@ install: ## Install dependencies
 
 api: ## Run FastAPI server
 	uv run taskowl
+
+consume: ## Start the Celery event consumer
+	uv run taskowl-consume
+
+mcp: ## Start the MCP server
+	uv run taskowl-mcp
 
 test: ## Run tests
 	uv run pytest tests/ -v

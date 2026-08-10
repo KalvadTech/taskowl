@@ -38,6 +38,8 @@ dev = [
 
 [project.scripts]
 taskowl = "taskowl.main:main"
+taskowl-consume = "taskowl.consumer.cli:main"
+taskowl-mcp = "taskowl.mcp.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -60,7 +62,9 @@ select = [
     "B",   # flake8-bugbear
     "SIM", # flake8-simplify
 ]
-ignore = []
+ignore = [
+    "B008",  # Allow Depends() in function defaults (FastAPI pattern)
+]
 
 [tool.ruff.format]
 quote-style = "double"

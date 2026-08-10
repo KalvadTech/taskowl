@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from taskowl.config import settings
 from taskowl.database import Base
-from taskowl.models import Task, Worker  # noqa: F401 - import to register models
+from taskowl.models import TaskEvent, WorkerEvent  # noqa: F401 - import to register models
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

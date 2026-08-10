@@ -21,6 +21,14 @@ class Settings(BaseSettings):
         default=8000,
         description="FastAPI server port",
     )
+    mcp_host: str = Field(
+        default="0.0.0.0",
+        description="MCP server host",
+    )
+    mcp_port: int = Field(
+        default=8001,
+        description="MCP server port",
+    )
     log_level: str = Field(
         default="INFO",
         description="Logging level (DEBUG, INFO, WARNING, ERROR)",

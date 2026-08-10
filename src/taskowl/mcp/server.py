@@ -5,9 +5,10 @@ This module sets up the MCP server that exposes taskowl tools to LLMs.
 
 import logging
 
+import uvicorn
 from mcp.server import MCPServer
-from starlette.applications import Starlette
 
+from taskowl.config import settings
 from taskowl.mcp.tools import register_tools
 
 logger = logging.getLogger(__name__)
@@ -21,9 +22,18 @@ def create_mcp_server() -> MCPServer:
     return server
 
 
-def build_mcp_app() -> Starlette:
-    """Build the MCP ASGI application."""
+def run_mcp_server() -> None:
+    """Run the MCP server as a standalone service."""
     server = create_mcp_server()
-    app: Starlette = server.streamable_http_app(stateless_http=True, json_response=True)
-    logger.info("MCP ASGI application built")
-    return app
+    logger.info(f"Starting MCP server on {settings.mcp_host}:{settings.mcp_port}")
+
+    # Get the ASGI app from the server
+    app = server.streamable_http_app(stateless_http=True, json_response=True)
+
+    # Run with uvicorn
+    uvicorn.run(
+        app,
+        host=settings.mcp_host,
+        port=settings.mcp_port,
+        log_level=settings.log_level.lower(),
+    )
