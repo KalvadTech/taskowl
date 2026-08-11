@@ -10,6 +10,14 @@ from mcp.server import MCPServer
 from taskowl.config import settings
 
 
+def _get_headers() -> dict[str, str]:
+    """Get HTTP headers for API requests, including auth if configured."""
+    headers: dict[str, str] = {}
+    if settings.api_key is not None:
+        headers["Authorization"] = f"Bearer {settings.api_key}"
+    return headers
+
+
 def register_tools(server: MCPServer) -> None:
     """Register all MCP tools with the server."""
 
@@ -47,6 +55,7 @@ def register_tools(server: MCPServer) -> None:
             response = await client.get(
                 f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks",
                 params=params,
+                headers=_get_headers(),
             )
             response.raise_for_status()
             return response.json()
@@ -63,7 +72,8 @@ def register_tools(server: MCPServer) -> None:
         """
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks/{task_id}"
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks/{task_id}",
+                headers=_get_headers(),
             )
             response.raise_for_status()
             return response.json()
@@ -80,7 +90,8 @@ def register_tools(server: MCPServer) -> None:
         """
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks/{task_id}/timeline"
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks/{task_id}/timeline",
+                headers=_get_headers(),
             )
             response.raise_for_status()
             return response.json()
@@ -99,6 +110,7 @@ def register_tools(server: MCPServer) -> None:
             response = await client.get(
                 f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks/summary",
                 params={"hours": hours},
+                headers=_get_headers(),
             )
             response.raise_for_status()
             return response.json()
@@ -111,7 +123,8 @@ def register_tools(server: MCPServer) -> None:
         """Get status of all Celery workers."""
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/workers"
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/workers",
+                headers=_get_headers(),
             )
             response.raise_for_status()
             return response.json()

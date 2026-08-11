@@ -352,7 +352,6 @@ dev = [
 - **Worker management**: pool scaling, shutdown/restart
 - **Alerts**: notify on failures, slow tasks, worker down
 - **Multi-broker support**: Redis, SQS
-- **Authentication**: API keys for MCP server
 - **Metrics export**: Prometheus, OpenTelemetry
 - **Task result storage**: optional result backend integration
 

@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from taskowl.auth import verify_api_key
 from taskowl.config import settings
 from taskowl.database import close_db, get_db, init_db
 from taskowl.queries import (
@@ -87,6 +88,7 @@ async def api_list_tasks(
     since: str | None = None,
     limit: int = 100,
     session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
 ) -> list[dict]:
     """List tasks with optional filters."""
     return await list_tasks_query(state, name, worker, since, limit, session)
@@ -94,7 +96,9 @@ async def api_list_tasks(
 
 @app.get("/api/tasks/summary")
 async def api_get_task_summary(
-    hours: int = 1, session: AsyncSession = Depends(get_db)
+    hours: int = 1,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
 ) -> TaskSummary:
     """Get aggregate task statistics."""
     result = await get_task_summary_query(hours, session)
@@ -102,7 +106,11 @@ async def api_get_task_summary(
 
 
 @app.get("/api/tasks/{task_id}")
-async def api_get_task(task_id: str, session: AsyncSession = Depends(get_db)) -> dict:
+async def api_get_task(
+    task_id: str,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> dict:
     """Get detailed information about a specific task."""
     result = await get_task_query(task_id, session)
     if "error" in result:
@@ -112,7 +120,9 @@ async def api_get_task(task_id: str, session: AsyncSession = Depends(get_db)) ->
 
 @app.get("/api/tasks/{task_id}/timeline")
 async def api_get_task_timeline(
-    task_id: str, session: AsyncSession = Depends(get_db)
+    task_id: str,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
 ) -> list[dict]:
     """Get chronological timeline of all events for a task."""
     result = await get_task_timeline_query(task_id, session)
@@ -124,6 +134,7 @@ async def api_get_task_timeline(
 @app.get("/api/workers")
 async def api_get_worker_status(
     session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
 ) -> list[dict]:
     """Get status of all Celery workers."""
     return await get_worker_status_query(session)

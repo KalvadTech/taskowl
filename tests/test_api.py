@@ -314,3 +314,132 @@ async def test_api_get_workers_with_data(client: AsyncClient, db_session: AsyncS
     assert data[0]["status"] == "heartbeat"
     assert data[0]["active"] == 2
     assert data[0]["processed"] == 100
+
+
+# Authentication tests
+
+
+@pytest.mark.asyncio
+async def test_api_auth_missing_key(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
+    """Test API returns 401 when API_KEY is set but no auth header provided."""
+    monkeypatch.setenv("API_KEY", "test-secret-key")
+
+    # Reload settings to pick up the new env var
+    import importlib
+
+    from taskowl import auth, config
+
+    importlib.reload(config)
+    importlib.reload(auth)
+
+    from httpx import ASGITransport
+
+    from taskowl.database import get_db
+    from taskowl.main import app
+
+    # Override database dependency
+    async def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as test_client:
+            response = await test_client.get("/api/tasks")
+            assert response.status_code == 401
+            assert "Missing authentication" in response.json()["detail"]
+    finally:
+        # Clean up
+        app.dependency_overrides.clear()
+        monkeypatch.delenv("API_KEY")
+        importlib.reload(config)
+        importlib.reload(auth)
+
+
+@pytest.mark.asyncio
+async def test_api_auth_wrong_key(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
+    """Test API returns 401 when wrong API key is provided."""
+    monkeypatch.setenv("API_KEY", "test-secret-key")
+
+    import importlib
+
+    from taskowl import auth, config
+
+    importlib.reload(config)
+    importlib.reload(auth)
+
+    from httpx import ASGITransport
+
+    from taskowl.database import get_db
+    from taskowl.main import app
+
+    # Override database dependency
+    async def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as test_client:
+            response = await test_client.get(
+                "/api/tasks", headers={"Authorization": "Bearer wrong-key"}
+            )
+            assert response.status_code == 401
+            assert "Invalid API key" in response.json()["detail"]
+    finally:
+        # Clean up
+        app.dependency_overrides.clear()
+        monkeypatch.delenv("API_KEY")
+        importlib.reload(config)
+        importlib.reload(auth)
+
+
+@pytest.mark.asyncio
+async def test_api_auth_correct_key(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
+    """Test API returns 200 when correct API key is provided."""
+    monkeypatch.setenv("API_KEY", "test-secret-key")
+
+    import importlib
+
+    from taskowl import auth, config
+
+    importlib.reload(config)
+    importlib.reload(auth)
+
+    from httpx import ASGITransport
+
+    from taskowl.database import get_db
+    from taskowl.main import app
+
+    # Override database dependency
+    async def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as test_client:
+            response = await test_client.get(
+                "/api/tasks", headers={"Authorization": "Bearer test-secret-key"}
+            )
+            assert response.status_code == 200
+    finally:
+        # Clean up
+        app.dependency_overrides.clear()
+        monkeypatch.delenv("API_KEY")
+        importlib.reload(config)
+        importlib.reload(auth)
+
+
+@pytest.mark.asyncio
+async def test_api_auth_not_configured(client: AsyncClient):
+    """Test API works without auth when API_KEY is not set."""
+    # API_KEY should not be set in test environment
+    response = await client.get("/api/tasks")
+    assert response.status_code == 200

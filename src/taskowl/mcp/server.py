@@ -8,6 +8,7 @@ import logging
 import uvicorn
 from mcp.server import MCPServer
 
+from taskowl.auth import AuthMiddleware
 from taskowl.config import settings
 from taskowl.mcp.tools import register_tools
 
@@ -29,6 +30,9 @@ def run_mcp_server() -> None:
 
     # Get the ASGI app from the server
     app = server.streamable_http_app(stateless_http=True, json_response=True)
+
+    # Wrap with auth middleware
+    app = AuthMiddleware(app)
 
     # Run with uvicorn
     uvicorn.run(

@@ -33,6 +33,10 @@ class Settings(BaseSettings):
         default="INFO",
         description="Logging level (DEBUG, INFO, WARNING, ERROR)",
     )
+    api_key: str | None = Field(
+        default=None,
+        description="API key for authentication (optional, no auth if not set)",
+    )
 
     model_config = {"env_prefix": "", "case_sensitive": False}
 
