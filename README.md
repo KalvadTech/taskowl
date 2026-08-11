@@ -7,7 +7,6 @@ Modern Celery task monitoring with MCP integration. No UI, just data.
 - **MCP-first**: Query tasks, workers, and queues via Model Context Protocol
 - **Event sourcing**: Append-only event log for complete audit trail and timeline reconstruction
 - **Real-time monitoring**: Capture Celery events as they happen
-- **Shaper integration**: Use [Shaper](https://github.com/taleshape-com/shaper) for SQL-based dashboards
 - **PostgreSQL backend**: Production-ready, no SQLite fallback complexity
 - **Modern stack**: Python 3.14, FastAPI, async everything
 
@@ -27,7 +26,7 @@ Modern Celery task monitoring with MCP integration. No UI, just data.
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Clone and install
-git clone https://github.com/yourusername/taskowl.git
+git clone https://github.com/KalvadTech/taskowl.git
 cd taskowl
 make install
 
@@ -132,44 +131,6 @@ Get status of all Celery workers.
 curl "http://localhost:8000/api/workers"
 ```
 
-### Shaper Integration
-
-Connect Shaper to the same PostgreSQL database and write SQL:
-
-```sql
--- Tasks per hour (reconstructed from latest events)
-SELECT
-  date_trunc('hour', timestamp)::XAXIS,
-  event_type::CATEGORY,
-  count(DISTINCT task_id)::BARCHART_STACKED
-FROM task_events
-WHERE timestamp > now() - interval '24 hours'
-GROUP BY ALL
-ORDER BY ALL;
-
--- Task timeline (all events for a specific task)
-SELECT
-  timestamp::XAXIS,
-  event_type::LABEL,
-  hostname::CATEGORY
-FROM task_events
-WHERE task_id = 'abc-123-def'
-ORDER BY timestamp;
-
--- Worker activity over time
-SELECT
-  date_trunc('minute', timestamp)::XAXIS,
-  hostname::CATEGORY,
-  avg(active)::LINECHART
-FROM worker_events
-WHERE event_type = 'heartbeat'
-  AND timestamp > now() - interval '1 hour'
-GROUP BY ALL
-ORDER BY ALL;
-```
-
-See [Shaper docs](https://github.com/taleshape-com/shaper) for more.
-
 ## Configuration
 
 All configuration is via environment variables:
@@ -259,155 +220,161 @@ Which workers are online?
 
 **Calls:** `GET /api/workers`
 
-## Development
+## Troubleshooting
 
-### Setup
+### Common Issues
 
+#### Database Connection Errors
+
+**Error**: `connection refused` or `role "user" does not exist`
+
+**Solutions**:
+1. Verify PostgreSQL is running: `pg_isready`
+2. Check DATABASE_URL format: `postgresql+asyncpg://user:pass@host:port/dbname`
+3. Verify database exists: `psql -U user -l | grep dbname`
+4. Check user permissions: `psql -U postgres -c "\du"`
+
+#### RabbitMQ Connection Errors
+
+**Error**: `ConnectionRefusedError` or `Socket closed`
+
+**Solutions**:
+1. Verify RabbitMQ is running: `rabbitmqctl status`
+2. Check CELERY_BROKER_URL format: `amqp://user:pass@host:port/vhost`
+3. Verify vhost exists: `rabbitmqctl list_vhosts`
+4. Check user permissions: `rabbitmqctl list_permissions`
+
+#### Consumer Not Receiving Events
+
+**Symptoms**: Consumer starts but no events appear in database
+
+**Diagnostic Steps**:
+1. Check consumer logs for connection success:
+   ```bash
+   make consume 2>&1 | grep "Connected to Celery broker"
+   ```
+
+2. Verify Celery workers are sending events:
+   ```bash
+   celery -A your_app events --dump
+   ```
+
+3. Check RabbitMQ queues:
+   ```bash
+   rabbitmqctl list_queues name messages consumers
+   ```
+
+4. Verify events are in database:
+   ```sql
+   SELECT COUNT(*) FROM task_events;
+   SELECT COUNT(*) FROM worker_events;
+   ```
+
+#### MCP Server Not Starting
+
+**Error**: Port already in use or connection refused
+
+**Solutions**:
+1. Check if port 8001 is in use:
+   ```bash
+   lsof -i :8001
+   # or
+   netstat -tulpn | grep 8001
+   ```
+
+2. Kill existing process:
+   ```bash
+   kill $(lsof -t -i :8001)
+   ```
+
+3. Verify MCP server is running:
+   ```bash
+   curl http://localhost:8001/mcp
+   ```
+
+#### API Server Issues
+
+**Error**: FastAPI not starting or endpoints returning errors
+
+**Solutions**:
+1. Check if port 8000 is in use:
+   ```bash
+   lsof -i :8000
+   ```
+
+2. Verify API server is running:
+   ```bash
+   curl http://localhost:8000/health
+   ```
+
+3. Check API logs for errors:
+   ```bash
+   make api 2>&1 | grep ERROR
+   ```
+
+### Diagnostic Commands
+
+**Check all services are running**:
 ```bash
-# Install dependencies
-make install
+# API server
+curl -s http://localhost:8000/health
 
-# Run tests
-make test
+# MCP server
+curl -s http://localhost:8001/mcp
 
-# Lint
-make lint
-make lint-fix
+# Database connection
+psql $DATABASE_URL -c "SELECT 1"
 
-# Type check
-make typecheck
-
-# Run all checks
-make check
+# RabbitMQ connection
+rabbitmqctl status
 ```
 
-### Running Locally
-
+**Check event flow**:
 ```bash
-# Start PostgreSQL and RabbitMQ (e.g., with Docker Compose or locally)
+# Count events in database
+psql $DATABASE_URL -c "
+  SELECT 
+    'task_events' as table_name, 
+    COUNT(*) as count 
+  FROM task_events
+  UNION ALL
+  SELECT 
+    'worker_events', 
+    COUNT(*) 
+  FROM worker_events
+"
 
-# Set environment variables
-export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/taskowl"
-export CELERY_BROKER_URL="amqp://guest:guest@localhost:5672//"
-
-# Run migrations
-make migrate
-
-# Start the API server
-make api
-
-# In another terminal, start the event consumer
-make consume
+# Check latest events
+psql $DATABASE_URL -c "
+  SELECT event_type, timestamp, hostname 
+  FROM task_events 
+  ORDER BY timestamp DESC 
+  LIMIT 5
+"
 ```
 
-### Testing with Sample Data
-
-Generate realistic test data to see taskowl in action:
-
+**View logs**:
 ```bash
-# Start the consumer first
-make consume
+# API server logs
+make api 2>&1 | tee api.log
 
-# In another terminal, generate test data
-python scripts/generate_test_data.py
+# Consumer logs
+make consume 2>&1 | tee consume.log
 
-# Or with custom options
-python scripts/generate_test_data.py --tasks 100 --hours 24 --slow-tasks 20
+# MCP server logs
+make mcp 2>&1 | tee mcp.log
 ```
 
-The script generates:
-- Task events (received, started, succeeded/failed/retried)
-- Worker events (online, heartbeat, offline)
-- Realistic task names and worker hostnames
-- Configurable success/failure/retry ratios
+### Getting Help
 
-Then query via MCP to see the data:
-- "Show me failed tasks"
-- "Show task timeline for [task-id]"
-- "Which workers are online?"
+If you encounter issues not covered here:
 
-### Project Structure
-
-```
-taskowl/
-├── src/taskowl/
-│   ├── main.py              # FastAPI app with REST API endpoints
-│   ├── config.py            # Environment variables
-│   ├── database.py          # Database connection
-│   ├── models.py            # SQLAlchemy models (TaskEvent, WorkerEvent)
-│   ├── queries.py           # Reusable query functions
-│   ├── consumer/            # Celery event consumer
-│   │   ├── cli.py           # Consumer CLI entry point
-│   │   ├── handlers.py      # Event handler functions
-│   │   └── receiver.py      # Celery event receiver
-│   └── mcp/
-│       ├── server.py        # MCP server
-│       ├── cli.py           # MCP CLI entry point
-│       └── tools.py         # MCP tools (call REST API)
-├── scripts/
-│   └── generate_test_data.py  # Test data generator
-├── tests/
-├── alembic/
-├── pyproject.toml
-└── README.md
-```
-
-## Database Schema
-
-taskowl uses an **event sourcing** architecture. Instead of storing current state, we store every event that happens. This gives us:
-- Complete audit trail
-- Ability to reconstruct state at any point in time
-- Task timelines showing the full execution flow
-- Better debugging and analysis capabilities
-
-### task_events
-
-Append-only log of all task events.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Auto-incrementing ID (primary key) |
-| event_type | VARCHAR(50) | Event type (sent, received, started, succeeded, failed, revoked, retried, rejected) |
-| task_id | UUID | Celery task ID |
-| timestamp | TIMESTAMP | Event timestamp |
-| hostname | VARCHAR(255) | Worker hostname (if applicable) |
-| name | VARCHAR(255) | Task name (from received event) |
-| args | JSON | Task arguments (from received event) |
-| kwargs | JSON | Task keyword arguments (from received event) |
-| result | JSON | Task result (from succeeded event) |
-| exception | TEXT | Exception type (from failed event) |
-| traceback | TEXT | Error traceback (from failed event) |
-| runtime | FLOAT | Task runtime in seconds (from succeeded event) |
-| retries | INTEGER | Number of retries (from received/retried event) |
-| eta | TIMESTAMP | ETA for task (from received event) |
-| expires | TIMESTAMP | Expiration time (from received event) |
-| queue | VARCHAR(255) | Queue name (from received event) |
-| root_id | UUID | Root task ID (from received event) |
-| parent_id | UUID | Parent task ID (from received event) |
-| pid | INTEGER | Process ID (from started event) |
-| signum | INTEGER | Signal number (from revoked event) |
-| terminated | BOOLEAN | Whether task was terminated (from revoked event) |
-| expired | BOOLEAN | Whether task expired (from revoked event) |
-| requeue | BOOLEAN | Whether task was requeued (from rejected event) |
-| created_at | TIMESTAMP | When this event record was created |
-
-### worker_events
-
-Append-only log of all worker events.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Auto-incrementing ID (primary key) |
-| event_type | VARCHAR(50) | Event type (online, heartbeat, offline) |
-| hostname | VARCHAR(255) | Worker hostname |
-| timestamp | TIMESTAMP | Event timestamp |
-| active | INTEGER | Number of active tasks (from heartbeat) |
-| processed | BIGINT | Total tasks processed (from heartbeat) |
-| freq | FLOAT | Heartbeat frequency (from heartbeat) |
-| sw_ident | VARCHAR(255) | Software identifier (from heartbeat/online) |
-| sw_ver | VARCHAR(255) | Software version (from heartbeat/online) |
-| sw_sys | VARCHAR(255) | Operating system (from heartbeat/online) |
-| created_at | TIMESTAMP | When this event record was created |
+1. Check existing issues: https://github.com/KalvadTech/taskowl/issues
+2. Open a new issue with:
+   - Error messages (full stack trace)
+   - Environment details (Python version, OS, PostgreSQL version)
+   - Steps to reproduce
+   - Relevant logs (sanitized of sensitive data)
 
 ## License
 
@@ -415,10 +382,9 @@ MIT License - see [LICENSE](LICENSE) for details
 
 ## Contributing
 
-Contributions welcome! Please open an issue or PR.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines on development setup, code style, testing, and the pull request process.
 
 ## Acknowledgments
 
 - [Flower](https://github.com/mher/flower) - The original Celery monitor
 - [Kanchi](https://github.com/getkanchi/kanchi) - Modern Celery monitoring inspiration
-- [Shaper](https://github.com/taleshape-com/shaper) - SQL-first dashboards

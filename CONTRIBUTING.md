@@ -1,0 +1,292 @@
+# Contributing to taskowl
+
+Thank you for your interest in contributing to taskowl! This guide will help you get started.
+
+## Code of Conduct
+
+Please be respectful and constructive in all interactions. We're building a welcoming community.
+
+## Development Setup
+
+### Prerequisites
+
+- Python 3.14+
+- PostgreSQL 14+
+- RabbitMQ
+- [uv](https://github.com/astral-sh/uv) package manager
+
+### Initial Setup
+
+1. **Fork and clone the repository**:
+   ```bash
+   git clone https://github.com/KalvadTech/taskowl.git
+   cd taskowl
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   make install
+   ```
+
+3. **Set up environment variables**:
+   ```bash
+   export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/taskowl"
+   export CELERY_BROKER_URL="amqp://guest:guest@localhost:5672//"
+   ```
+
+4. **Run database migrations**:
+   ```bash
+   make migrate
+   ```
+
+5. **Verify setup**:
+   ```bash
+   make check  # Should pass all checks
+   ```
+
+## Development Workflow
+
+### Running Services
+
+You'll typically need three services running during development:
+
+```bash
+# Terminal 1: API server
+make api
+
+# Terminal 2: Event consumer
+make consume
+
+# Terminal 3: MCP server
+make mcp
+```
+
+### Making Changes
+
+1. **Create a feature branch**:
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+2. **Make your changes**:
+   - Follow the existing code style
+   - Add tests for new functionality
+   - Update documentation as needed
+
+3. **Run quality checks**:
+   ```bash
+   make check  # Runs lint, typecheck, and tests
+   ```
+
+4. **Commit your changes**:
+   ```bash
+   git add .
+   git commit -m "Add your feature description"
+   ```
+
+5. **Push and create PR**:
+   ```bash
+   git push origin feature/your-feature-name
+   ```
+
+## Code Style
+
+### Python Standards
+
+- **Formatter**: ruff (line length: 100)
+- **Type checker**: ty (strict mode)
+- **Import sorting**: ruff (isort)
+- **Python version**: 3.14+
+
+### Guidelines
+
+1. **Type annotations**: All functions must have type hints
+   ```python
+   # Good
+   def get_task(task_id: str) -> dict:
+       ...
+   
+   # Bad
+   def get_task(task_id):
+       ...
+   ```
+
+2. **Async/await**: Use async for I/O operations
+   ```python
+   # Good
+   async def fetch_data() -> list[dict]:
+       async with session.execute(query) as result:
+           return result.fetchall()
+   
+   # Bad
+   def fetch_data():
+       # blocking I/O
+   ```
+
+3. **Error handling**: Be explicit about error cases
+   ```python
+   # Good
+   try:
+       result = await query()
+   except ValueError as e:
+       logger.error(f"Invalid input: {e}")
+       raise
+   
+   # Bad
+   try:
+       result = await query()
+   except:
+       pass
+   ```
+
+4. **Documentation**: Document public APIs
+   ```python
+   def complex_function(param: str) -> dict:
+       """
+       Brief description of what this function does.
+       
+       Args:
+           param: Description of parameter
+       
+       Returns:
+           Description of return value
+       
+       Raises:
+           ValueError: When param is invalid
+       """
+   ```
+
+## Testing
+
+### Running Tests
+
+```bash
+# Run all tests
+make test
+
+# Run specific test file
+uv run pytest tests/test_queries.py -v
+
+# Run with coverage (future enhancement)
+uv run pytest --cov=taskowl
+```
+
+### Writing Tests
+
+1. **Test location**: `tests/` directory
+2. **Naming**: `test_<module>.py`
+3. **Structure**: Use pytest fixtures from `conftest.py`
+
+Example test:
+```python
+@pytest.mark.asyncio
+async def test_list_tasks_with_filter(db_session: AsyncSession):
+    """Test list_tasks_query with state filter."""
+    # Arrange
+    task_id = uuid.uuid4()
+    db_session.add(TaskEvent(
+        event_type="succeeded",
+        task_id=task_id,
+        timestamp=datetime.now(UTC),
+    ))
+    await db_session.commit()
+    
+    # Act
+    result = await list_tasks_query(state="succeeded", session=db_session)
+    
+    # Assert
+    assert len(result) == 1
+    assert result[0]["id"] == str(task_id)
+```
+
+### Test Coverage
+
+- **Queries**: Test all query functions with various inputs
+- **API endpoints**: Test all REST endpoints
+- **Handlers**: Test event handlers
+- **Edge cases**: Empty data, invalid inputs, error conditions
+
+## Architecture Overview
+
+For detailed architecture documentation, see [PLAN.md](./PLAN.md).
+
+### Key Components
+
+1. **API Server** (`src/taskowl/main.py`)
+   - FastAPI application
+   - REST endpoints for tasks, workers, summaries
+   - Dependency injection for database sessions
+
+2. **Query Layer** (`src/taskowl/queries.py`)
+   - Reusable query functions
+   - Event sourcing logic
+   - State reconstruction from events
+
+3. **Event Consumer** (`src/taskowl/consumer/`)
+   - Celery event receiver
+   - Event handlers for different event types
+   - Database persistence
+
+4. **MCP Server** (`src/taskowl/mcp/`)
+   - MCP protocol implementation
+   - Tools that call REST API
+   - HTTP transport on port 8001
+
+### Data Flow
+
+```
+Celery Workers → RabbitMQ → Consumer → PostgreSQL
+                                         ↓
+                                    REST API ← MCP Server → LLM
+```
+
+## Pull Request Process
+
+### Before Submitting
+
+1. ✅ All tests pass: `make check`
+2. ✅ Code is formatted: `uv run ruff format .`
+3. ✅ No linting errors: `uv run ruff check .`
+4. ✅ Type checking passes: `uv run ty check src/`
+5. ✅ Documentation updated (if needed)
+6. ✅ Tests added for new functionality
+
+### PR Description Template
+
+```markdown
+## Description
+Brief description of changes
+
+## Type of Change
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Documentation update
+
+## Testing
+Describe how you tested your changes
+
+## Checklist
+- [ ] Code follows project style guidelines
+- [ ] Self-review completed
+- [ ] Tests added/updated
+- [ ] Documentation updated
+- [ ] All checks pass
+```
+
+### Review Process
+
+1. **Automated checks**: CI must pass
+2. **Code review**: At least one approval required
+3. **Discussion**: Address all review comments
+4. **Merge**: Squash and merge to main
+
+## Getting Help
+
+- **Questions**: Open a discussion on GitHub
+- **Bugs**: Open an issue with reproduction steps
+- **Features**: Open an issue to discuss before implementing
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the MIT License.
