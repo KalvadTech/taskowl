@@ -438,6 +438,43 @@ async def test_api_auth_correct_key(db_session: AsyncSession, monkeypatch: pytes
 
 
 @pytest.mark.asyncio
+async def test_api_auth_empty_string(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
+    """Test API works without auth when API_KEY is set to empty string."""
+    monkeypatch.setenv("API_KEY", "")
+
+    import importlib
+
+    from taskowl import auth, config
+
+    importlib.reload(config)
+    importlib.reload(auth)
+
+    from httpx import ASGITransport
+
+    from taskowl.database import get_db
+    from taskowl.main import app
+
+    # Override database dependency
+    async def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as test_client:
+            response = await test_client.get("/api/tasks")
+            assert response.status_code == 200
+    finally:
+        # Clean up
+        app.dependency_overrides.clear()
+        monkeypatch.delenv("API_KEY", raising=False)
+        importlib.reload(config)
+        importlib.reload(auth)
+
+
+@pytest.mark.asyncio
 async def test_api_auth_not_configured(client: AsyncClient):
     """Test API works without auth when API_KEY is not set."""
     # API_KEY should not be set in test environment

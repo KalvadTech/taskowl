@@ -355,6 +355,10 @@ dev = [
 - **Metrics export**: Prometheus, OpenTelemetry
 - **Task result storage**: optional result backend integration
 
+## Completed Enhancements
+
+- **Authentication** ✅: API key authentication for REST API and MCP server via `API_KEY` environment variable
+
 ## License
 
 MIT License - see LICENSE file for details

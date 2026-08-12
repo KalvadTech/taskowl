@@ -144,6 +144,90 @@ All configuration is via environment variables:
 | `MCP_HOST` | MCP server host | `0.0.0.0` | No |
 | `MCP_PORT` | MCP server port | `8001` | No |
 | `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` | No |
+| `API_KEY` | API key for authentication (optional) | None (disabled) | No |
+
+## Authentication
+
+taskowl supports optional API key authentication for both the REST API and MCP server. When `API_KEY` is set, all requests must include a valid Bearer token.
+
+### Enabling Authentication
+
+Set the `API_KEY` environment variable:
+
+```bash
+export API_KEY="your-secret-key-here"
+```
+
+### Using Authentication
+
+**REST API:**
+
+Include the API key in the `Authorization` header:
+
+```bash
+curl -H "Authorization: Bearer your-secret-key-here" http://localhost:8000/api/tasks
+```
+
+**MCP Server:**
+
+Include the API key in the `Authorization` header:
+
+```bash
+curl -X POST http://localhost:8001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret-key-here" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+**OpenCode Configuration:**
+
+Add the `headers` field to your `opencode.json`:
+
+```json
+{
+  "mcp": {
+    "taskowl": {
+      "type": "remote",
+      "url": "http://localhost:8001/mcp",
+      "enabled": true,
+      "oauth": false,
+      "headers": {
+        "Authorization": "Bearer your-secret-key-here"
+      }
+    }
+  }
+}
+```
+
+### Disabling Authentication
+
+To disable authentication, simply don't set `API_KEY` or set it to an empty string:
+
+```bash
+unset API_KEY
+# or
+export API_KEY=""
+```
+
+When authentication is disabled, all endpoints are accessible without an API key.
+
+### Protected Endpoints
+
+When authentication is enabled, the following endpoints require a valid API key:
+
+**REST API:**
+- `GET /api/tasks`
+- `GET /api/tasks/{task_id}`
+- `GET /api/tasks/{task_id}/timeline`
+- `GET /api/tasks/summary`
+- `GET /api/workers`
+
+**MCP Server:**
+- All MCP tool calls
+
+The following endpoints remain accessible without authentication:
+- `GET /health` - Health check endpoint
+- `GET /` - Root endpoint (app info)
 
 ## MCP Tools
 

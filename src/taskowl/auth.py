@@ -21,10 +21,10 @@ async def verify_api_key(
 ) -> None:
     """FastAPI dependency to verify API key.
 
-    If settings.api_key is None, authentication is disabled.
+    If settings.api_key is None or empty, authentication is disabled.
     If settings.api_key is set, requires valid Bearer token.
     """
-    if settings.api_key is None:
+    if not settings.api_key:
         # Auth disabled
         return
 
@@ -48,7 +48,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Any) -> Any:
         """Check API key before processing request."""
-        if settings.api_key is None:
+        if not settings.api_key:
             # Auth disabled
             return await call_next(request)
 
