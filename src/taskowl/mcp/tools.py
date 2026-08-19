@@ -128,3 +128,43 @@ def register_tools(server: MCPServer) -> None:
             )
             response.raise_for_status()
             return response.json()
+
+    @server.tool(
+        name="revoke_task",
+        description="Revoke (cancel) a task. Optionally terminate if currently running.",
+    )
+    async def revoke_task(task_id: str, terminate: bool = False) -> dict:
+        """Revoke (cancel) a task.
+
+        Args:
+            task_id: UUID of the task to revoke
+            terminate: If True, terminate the task if it's currently running
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks/{task_id}/revoke",
+                params={"terminate": terminate},
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="retry_task",
+        description=(
+            "Retry a failed or revoked task by creating a new task with the same parameters."
+        ),
+    )
+    async def retry_task(task_id: str) -> dict:
+        """Retry a failed or revoked task.
+
+        Args:
+            task_id: UUID of the task to retry
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks/{task_id}/retry",
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()

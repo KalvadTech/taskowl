@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from taskowl.actions import retry_task, revoke_task
 from taskowl.auth import verify_api_key
 from taskowl.config import settings
 from taskowl.database import close_db, get_db, init_db
@@ -138,6 +139,42 @@ async def api_get_worker_status(
 ) -> list[dict]:
     """Get status of all Celery workers."""
     return await get_worker_status_query(session)
+
+
+@app.post("/api/tasks/{task_id}/revoke")
+async def api_revoke_task(
+    task_id: str,
+    terminate: bool = False,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Revoke (cancel) a task.
+
+    Args:
+        task_id: UUID of the task to revoke
+        terminate: If True, terminate the task if it's currently running
+    """
+    result = await revoke_task(task_id, terminate, session)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/tasks/{task_id}/retry")
+async def api_retry_task(
+    task_id: str,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Retry a failed or revoked task.
+
+    Args:
+        task_id: UUID of the task to retry
+    """
+    result = await retry_task(task_id, session)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 # MCP server is now run separately via taskowl-mcp command

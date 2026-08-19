@@ -1,7 +1,7 @@
 """Tests for database models."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -94,7 +94,7 @@ async def test_task_event_timeline(db_session):
     event2 = TaskEvent(
         event_type="started",
         task_id=task_id,
-        timestamp=now.replace(microsecond=now.microsecond + 1000),
+        timestamp=now + timedelta(microseconds=1000),
         hostname="worker1@localhost",
         pid=12345,
     )
@@ -105,7 +105,7 @@ async def test_task_event_timeline(db_session):
     event3 = TaskEvent(
         event_type="succeeded",
         task_id=task_id,
-        timestamp=now.replace(microsecond=now.microsecond + 2000),
+        timestamp=now + timedelta(microseconds=2000),
         hostname="worker1@localhost",
         runtime=1.5,
         result={"status": "ok"},

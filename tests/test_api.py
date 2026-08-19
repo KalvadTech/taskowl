@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -480,3 +481,144 @@ async def test_api_auth_not_configured(client: AsyncClient):
     # API_KEY should not be set in test environment
     response = await client.get("/api/tasks")
     assert response.status_code == 200
+
+
+# Task action endpoint tests
+
+
+@pytest.mark.asyncio
+async def test_api_revoke_task_success(client: AsyncClient, db_session: AsyncSession):
+    """Test POST /api/tasks/{task_id}/revoke with valid task."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="test_task",
+        )
+    )
+    await db_session.commit()
+
+    with patch("taskowl.actions._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_get_app.return_value = mock_app
+
+        response = await client.post(f"/api/tasks/{task_id}/revoke")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert "has been revoked" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_api_revoke_task_with_terminate(client: AsyncClient, db_session: AsyncSession):
+    """Test POST /api/tasks/{task_id}/revoke with terminate=true."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+        )
+    )
+    await db_session.commit()
+
+    with patch("taskowl.actions._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_get_app.return_value = mock_app
+
+        response = await client.post(f"/api/tasks/{task_id}/revoke?terminate=true")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["terminated"] is True
+
+
+@pytest.mark.asyncio
+async def test_api_revoke_task_not_found(client: AsyncClient):
+    """Test POST /api/tasks/{task_id}/revoke with non-existent task."""
+    task_id = uuid.uuid4()
+    response = await client.post(f"/api/tasks/{task_id}/revoke")
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
+    assert "Task not found" in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_api_retry_task_success(client: AsyncClient, db_session: AsyncSession):
+    """Test POST /api/tasks/{task_id}/retry with valid failed task."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="test_task",
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="failed",
+            task_id=task_id,
+            timestamp=now + timedelta(seconds=1),
+            hostname="worker1@localhost",
+        )
+    )
+    await db_session.commit()
+
+    with patch("taskowl.actions._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_result = MagicMock()
+        mock_result.id = "new-task-id-123"
+        mock_app.send_task.return_value = mock_result
+        mock_get_app.return_value = mock_app
+
+        response = await client.post(f"/api/tasks/{task_id}/retry")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert "has been retried" in data["message"]
+        assert data["new_task_id"] == "new-task-id-123"
+
+
+@pytest.mark.asyncio
+async def test_api_retry_task_wrong_state(client: AsyncClient, db_session: AsyncSession):
+    """Test POST /api/tasks/{task_id}/retry with non-failed task."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="test_task",
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="succeeded",
+            task_id=task_id,
+            timestamp=now + timedelta(seconds=1),
+            hostname="worker1@localhost",
+        )
+    )
+    await db_session.commit()
+
+    response = await client.post(f"/api/tasks/{task_id}/retry")
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
+    assert "succeeded" in data["detail"]

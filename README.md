@@ -131,6 +131,51 @@ Get status of all Celery workers.
 curl "http://localhost:8000/api/workers"
 ```
 
+#### POST /api/tasks/{task_id}/revoke
+
+Revoke (cancel) a task. Optionally terminate it if it's currently running.
+
+**Query Parameters:**
+- `terminate` (optional): If `true`, terminate the task if it's currently running (default: `false`)
+
+**Example:**
+```bash
+# Revoke a pending task
+curl -X POST "http://localhost:8000/api/tasks/abc-123-def/revoke"
+
+# Revoke and terminate a running task
+curl -X POST "http://localhost:8000/api/tasks/abc-123-def/revoke?terminate=true"
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Task abc-123-def has been revoked",
+  "terminated": false
+}
+```
+
+#### POST /api/tasks/{task_id}/retry
+
+Retry a failed or revoked task by creating a new task with the same parameters.
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/tasks/abc-123-def/retry"
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Task abc-123-def has been retried",
+  "new_task_id": "def-456-ghi"
+}
+```
+
+**Note:** Only tasks in `failed` or `revoked` state can be retried. Attempting to retry a task in any other state will return an error.
+
 ## Configuration
 
 All configuration is via environment variables:
@@ -221,6 +266,8 @@ When authentication is enabled, the following endpoints require a valid API key:
 - `GET /api/tasks/{task_id}/timeline`
 - `GET /api/tasks/summary`
 - `GET /api/workers`
+- `POST /api/tasks/{task_id}/revoke`
+- `POST /api/tasks/{task_id}/retry`
 
 **MCP Server:**
 - All MCP tool calls
@@ -303,6 +350,37 @@ Which workers are online?
 ```
 
 **Calls:** `GET /api/workers`
+
+### revoke_task
+
+Revoke (cancel) a task. Optionally terminate it if it's currently running.
+
+**Parameters:**
+- `task_id`: UUID of the task to revoke
+- `terminate` (optional): If `true`, terminate the task if it's currently running (default: `false`)
+
+**Example:**
+```
+Cancel task abc-123-def
+```
+
+**Calls:** `POST /api/tasks/{task_id}/revoke`
+
+### retry_task
+
+Retry a failed or revoked task by creating a new task with the same parameters.
+
+**Parameters:**
+- `task_id`: UUID of the task to retry
+
+**Example:**
+```
+Retry task abc-123-def
+```
+
+**Calls:** `POST /api/tasks/{task_id}/retry`
+
+**Note:** Only tasks in `failed` or `revoked` state can be retried.
 
 ## Troubleshooting
 

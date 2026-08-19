@@ -173,6 +173,33 @@
 - Troubleshooting guide
 - Contributing guidelines
 
+### Phase 5: Write Capabilities ✅ COMPLETE
+**Goal**: Enable task actions (retry, revoke) via REST API and MCP
+
+**Tasks**:
+- [x] Create `actions.py` with `revoke_task` and `retry_task` functions
+- [x] Add `POST /api/tasks/{task_id}/revoke` endpoint
+- [x] Add `POST /api/tasks/{task_id}/retry` endpoint
+- [x] Add `revoke_task` MCP tool
+- [x] Add `retry_task` MCP tool
+- [x] Add comprehensive tests for actions and API endpoints
+- [x] Update documentation with new endpoints and tools
+
+**Deliverables**:
+- Task revocation capability (with optional termination)
+- Task retry capability (creates new task with same parameters)
+- 7 new REST API endpoints (2 POST endpoints)
+- 2 new MCP tools
+- 17 new tests (12 for actions, 5 for API endpoints)
+- Updated documentation
+
+**Notes**:
+- Revoke uses Celery's `app.control.revoke()` API
+- Retry creates a new task with same name, args, kwargs, and queue
+- Only failed/revoked tasks can be retried
+- Both actions require authentication (via API_KEY)
+- Actions follow the same pattern: actions.py → main.py → mcp/tools.py
+
 ## Technical Specifications
 
 ### Tech Stack
@@ -297,6 +324,20 @@ async def get_worker_status() -> list[dict]:
     """Get status of all Celery workers reconstructed from latest events."""
 ```
 
+#### revoke_task
+```python
+@server.tool(name="revoke_task", description="Revoke (cancel) a task. Optionally terminate if currently running.")
+async def revoke_task(task_id: str, terminate: bool = False) -> dict:
+    """Revoke (cancel) a task. Optionally terminate if currently running."""
+```
+
+#### retry_task
+```python
+@server.tool(name="retry_task", description="Retry a failed or revoked task by creating a new task with the same parameters.")
+async def retry_task(task_id: str) -> dict:
+    """Retry a failed or revoked task by creating a new task with the same parameters."""
+```
+
 ### Dependencies
 
 ```toml
@@ -345,10 +386,10 @@ dev = [
 **Phase 2**: ✅ COMPLETE - Event consumer with event sourcing, separate process, timeline visualization
 **Phase 3**: ✅ COMPLETE - REST API with 5 endpoints, MCP tools refactored to call REST API
 **Phase 4**: ✅ COMPLETE - Shaper integration documented, comprehensive README, troubleshooting guide, CONTRIBUTING.md
+**Phase 5**: ✅ COMPLETE - Write capabilities (revoke, retry) via REST API and MCP tools
 
 ## Future Enhancements (Post-MVP)
 
-- **Write capabilities**: retry, cancel, revoke tasks via MCP
 - **Worker management**: pool scaling, shutdown/restart
 - **Alerts**: notify on failures, slow tasks, worker down
 - **Multi-broker support**: Redis, SQS
@@ -358,6 +399,7 @@ dev = [
 ## Completed Enhancements
 
 - **Authentication** ✅: API key authentication for REST API and MCP server via `API_KEY` environment variable
+- **Write Capabilities** ✅: Task revocation and retry via REST API endpoints and MCP tools
 
 ## License
 
