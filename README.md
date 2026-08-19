@@ -1,3 +1,5 @@
+<img src="logo.png" alt="taskowl" width="300"/>
+
 # taskowl
 
 Modern Celery task monitoring with MCP integration. No UI, just data.
