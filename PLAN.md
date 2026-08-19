@@ -200,6 +200,35 @@
 - Both actions require authentication (via API_KEY)
 - Actions follow the same pattern: actions.py → main.py → mcp/tools.py
 
+### Phase 6: Worker Management ✅ COMPLETE
+**Goal**: Enable worker control and monitoring via REST API and MCP
+
+**Tasks**:
+- [x] Fix consumer shutdown bug (add timeout to recv.capture)
+- [x] Create `workers.py` with worker management functions
+- [x] Add REST API endpoints for worker operations
+- [x] Add MCP tools for worker management
+- [x] Add comprehensive tests
+- [x] Update documentation
+
+**Deliverables**:
+- Fixed consumer shutdown (responds to CTRL+C within 1 second)
+- Worker listing and statistics
+- Worker shutdown capability
+- Worker pool scaling (grow/shrink)
+- Active task monitoring
+- 5 new REST API endpoints
+- 5 new MCP tools
+- Comprehensive test coverage
+- Updated documentation
+
+**Notes**:
+- Uses Celery's `app.control` API for worker management
+- Pool scaling uses `pool_grow`/`pool_shrink` (fixed pool approach)
+- Worker shutdown is graceful (waits for current tasks)
+- All operations require authentication (via API_KEY)
+- Follows the same pattern: workers.py → main.py → mcp/tools.py
+
 ## Technical Specifications
 
 ### Tech Stack
@@ -338,6 +367,41 @@ async def retry_task(task_id: str) -> dict:
     """Retry a failed or revoked task by creating a new task with the same parameters."""
 ```
 
+#### list_workers
+```python
+@server.tool(name="list_workers", description="List all active Celery workers")
+async def list_workers() -> dict:
+    """List all active Celery workers."""
+```
+
+#### get_worker_stats
+```python
+@server.tool(name="get_worker_stats", description="Get detailed statistics for a specific worker")
+async def get_worker_stats(worker_name: str) -> dict:
+    """Get detailed statistics for a specific worker."""
+```
+
+#### shutdown_worker
+```python
+@server.tool(name="shutdown_worker", description="Gracefully shutdown a Celery worker")
+async def shutdown_worker(worker_name: str) -> dict:
+    """Gracefully shutdown a Celery worker."""
+```
+
+#### scale_worker_pool
+```python
+@server.tool(name="scale_worker_pool", description="Scale a worker's pool size up or down")
+async def scale_worker_pool(worker_name: str, delta: int) -> dict:
+    """Scale a worker's pool size up or down."""
+```
+
+#### get_active_tasks
+```python
+@server.tool(name="get_active_tasks", description="Get currently executing tasks across all workers or a specific worker")
+async def get_active_tasks(worker_name: str | None = None) -> dict:
+    """Get currently executing tasks across all workers or a specific worker."""
+```
+
 ### Dependencies
 
 ```toml
@@ -387,10 +451,10 @@ dev = [
 **Phase 3**: ✅ COMPLETE - REST API with 5 endpoints, MCP tools refactored to call REST API
 **Phase 4**: ✅ COMPLETE - Shaper integration documented, comprehensive README, troubleshooting guide, CONTRIBUTING.md
 **Phase 5**: ✅ COMPLETE - Write capabilities (revoke, retry) via REST API and MCP tools
+**Phase 6**: ✅ COMPLETE - Worker management (list, stats, shutdown, scale, active tasks) via REST API and MCP tools
 
 ## Future Enhancements (Post-MVP)
 
-- **Worker management**: pool scaling, shutdown/restart
 - **Alerts**: notify on failures, slow tasks, worker down
 - **Multi-broker support**: Redis, SQS
 - **Metrics export**: Prometheus, OpenTelemetry
@@ -400,6 +464,7 @@ dev = [
 
 - **Authentication** ✅: API key authentication for REST API and MCP server via `API_KEY` environment variable
 - **Write Capabilities** ✅: Task revocation and retry via REST API endpoints and MCP tools
+- **Worker Management** ✅: Worker listing, statistics, shutdown, pool scaling, and active task monitoring via REST API and MCP tools
 
 ## License
 

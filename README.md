@@ -133,6 +133,125 @@ Get status of all Celery workers.
 curl "http://localhost:8000/api/workers"
 ```
 
+#### GET /api/workers/list
+
+List all active Celery workers.
+
+**Example:**
+```bash
+curl "http://localhost:8000/api/workers/list"
+```
+
+**Response:**
+```json
+{
+  "workers": [
+    {
+      "name": "celery@worker1",
+      "status": "online"
+    }
+  ]
+}
+```
+
+#### GET /api/workers/{worker_name}/stats
+
+Get detailed statistics for a specific worker.
+
+**Example:**
+```bash
+curl "http://localhost:8000/api/workers/celery@worker1/stats"
+```
+
+**Response:**
+```json
+{
+  "stats": {
+    "pool": {
+      "max-concurrency": 4,
+      "processes": [4321, 4322, 4323, 4324]
+    },
+    "uptime": 3600,
+    "pid": 1234
+  }
+}
+```
+
+#### POST /api/workers/{worker_name}/shutdown
+
+Gracefully shutdown a worker.
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/workers/celery@worker1/shutdown"
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Shutdown command sent to celery@worker1"
+}
+```
+
+#### POST /api/workers/{worker_name}/scale
+
+Scale worker pool up or down.
+
+**Query Parameters:**
+- `delta`: Number of processes to add (positive) or remove (negative)
+
+**Example:**
+```bash
+# Grow pool by 2
+curl -X POST "http://localhost:8000/api/workers/celery@worker1/scale?delta=2"
+
+# Shrink pool by 1
+curl -X POST "http://localhost:8000/api/workers/celery@worker1/scale?delta=-1"
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Worker pool grown by 2",
+  "worker": "celery@worker1",
+  "delta": 2
+}
+```
+
+#### GET /api/workers/active-tasks
+
+Get currently executing tasks.
+
+**Query Parameters:**
+- `worker_name` (optional): Filter by specific worker
+
+**Example:**
+```bash
+# All active tasks
+curl "http://localhost:8000/api/workers/active-tasks"
+
+# Active tasks for specific worker
+curl "http://localhost:8000/api/workers/active-tasks?worker_name=celery@worker1"
+```
+
+**Response:**
+```json
+{
+  "active_tasks": {
+    "celery@worker1": [
+      {
+        "id": "abc-123-def",
+        "name": "myapp.tasks.process_data",
+        "args": ["user@example.com"],
+        "kwargs": {}
+      }
+    ]
+  }
+}
+```
+
 #### POST /api/tasks/{task_id}/revoke
 
 Revoke (cancel) a task. Optionally terminate it if it's currently running.
@@ -268,6 +387,11 @@ When authentication is enabled, the following endpoints require a valid API key:
 - `GET /api/tasks/{task_id}/timeline`
 - `GET /api/tasks/summary`
 - `GET /api/workers`
+- `GET /api/workers/list`
+- `GET /api/workers/{worker_name}/stats`
+- `POST /api/workers/{worker_name}/shutdown`
+- `POST /api/workers/{worker_name}/scale`
+- `GET /api/workers/active-tasks`
 - `POST /api/tasks/{task_id}/revoke`
 - `POST /api/tasks/{task_id}/retry`
 
@@ -383,6 +507,74 @@ Retry task abc-123-def
 **Calls:** `POST /api/tasks/{task_id}/retry`
 
 **Note:** Only tasks in `failed` or `revoked` state can be retried.
+
+### list_workers
+
+List all active Celery workers.
+
+**Example:**
+```
+Which workers are currently online?
+```
+
+**Calls:** `GET /api/workers/list`
+
+### get_worker_stats
+
+Get detailed statistics for a specific worker.
+
+**Parameters:**
+- `worker_name`: Name of the worker (e.g., 'celery@worker1')
+
+**Example:**
+```
+Show me stats for worker celery@worker1
+```
+
+**Calls:** `GET /api/workers/{worker_name}/stats`
+
+### shutdown_worker
+
+Gracefully shutdown a Celery worker.
+
+**Parameters:**
+- `worker_name`: Name of the worker to shutdown
+
+**Example:**
+```
+Shutdown worker celery@worker1
+```
+
+**Calls:** `POST /api/workers/{worker_name}/shutdown`
+
+### scale_worker_pool
+
+Scale a worker's pool size up or down.
+
+**Parameters:**
+- `worker_name`: Name of the worker
+- `delta`: Number of processes to add (positive) or remove (negative)
+
+**Example:**
+```
+Increase pool size for celery@worker1 by 2
+```
+
+**Calls:** `POST /api/workers/{worker_name}/scale`
+
+### get_active_tasks
+
+Get currently executing tasks.
+
+**Parameters:**
+- `worker_name` (optional): Filter by specific worker
+
+**Example:**
+```
+What tasks are currently running?
+```
+
+**Calls:** `GET /api/workers/active-tasks`
 
 ## Troubleshooting
 

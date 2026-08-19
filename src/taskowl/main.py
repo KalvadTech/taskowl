@@ -20,6 +20,13 @@ from taskowl.queries import (
     get_worker_status_query,
     list_tasks_query,
 )
+from taskowl.workers import (
+    get_active_tasks,
+    get_worker_stats,
+    list_workers,
+    scale_worker_pool,
+    shutdown_worker,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -175,6 +182,77 @@ async def api_retry_task(
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+@app.get("/api/workers/list")
+async def api_list_workers(
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """List all active Celery workers."""
+    return await list_workers()
+
+
+@app.get("/api/workers/{worker_name}/stats")
+async def api_get_worker_stats(
+    worker_name: str,
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Get statistics for a specific worker.
+
+    Args:
+        worker_name: Name of the worker (e.g., 'celery@worker1')
+    """
+    result = await get_worker_stats(worker_name)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@app.post("/api/workers/{worker_name}/shutdown")
+async def api_shutdown_worker(
+    worker_name: str,
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Gracefully shutdown a worker.
+
+    Args:
+        worker_name: Name of the worker to shutdown
+    """
+    result = await shutdown_worker(worker_name)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/workers/{worker_name}/scale")
+async def api_scale_worker_pool(
+    worker_name: str,
+    delta: int,
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Scale worker pool up or down.
+
+    Args:
+        worker_name: Name of the worker
+        delta: Number of processes to add (positive) or remove (negative)
+    """
+    result = await scale_worker_pool(worker_name, delta)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/api/workers/active-tasks")
+async def api_get_active_tasks(
+    worker_name: str | None = None,
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Get currently executing tasks.
+
+    Args:
+        worker_name: Optional worker name to filter by
+    """
+    return await get_active_tasks(worker_name)
 
 
 # MCP server is now run separately via taskowl-mcp command

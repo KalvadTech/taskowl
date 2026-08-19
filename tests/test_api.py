@@ -622,3 +622,127 @@ async def test_api_retry_task_wrong_state(client: AsyncClient, db_session: Async
     data = response.json()
     assert "detail" in data
     assert "succeeded" in data["detail"]
+
+
+# Worker management endpoint tests
+
+
+@pytest.mark.asyncio
+async def test_api_list_workers(client: AsyncClient):
+    """Test GET /api/workers/list."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.ping.return_value = {"celery@worker1": {"ok": "pong"}}
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        response = await client.get("/api/workers/list")
+        assert response.status_code == 200
+        data = response.json()
+        assert "workers" in data
+
+
+@pytest.mark.asyncio
+async def test_api_get_worker_stats(client: AsyncClient):
+    """Test GET /api/workers/{worker_name}/stats."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.stats.return_value = {"celery@worker1": {"pool": {"max-concurrency": 4}}}
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        response = await client.get("/api/workers/celery@worker1/stats")
+        assert response.status_code == 200
+        data = response.json()
+        assert "stats" in data
+
+
+@pytest.mark.asyncio
+async def test_api_get_worker_stats_not_found(client: AsyncClient):
+    """Test GET /api/workers/{worker_name}/stats with non-existent worker."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.stats.return_value = {}
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        response = await client.get("/api/workers/celery@worker1/stats")
+        assert response.status_code == 404
+        data = response.json()
+        assert "detail" in data
+
+
+@pytest.mark.asyncio
+async def test_api_shutdown_worker(client: AsyncClient):
+    """Test POST /api/workers/{worker_name}/shutdown."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_get_app.return_value = mock_app
+
+        response = await client.post("/api/workers/celery@worker1/shutdown")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_api_scale_worker_pool(client: AsyncClient):
+    """Test POST /api/workers/{worker_name}/scale."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_get_app.return_value = mock_app
+
+        response = await client.post("/api/workers/celery@worker1/scale?delta=2")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["delta"] == 2
+
+
+@pytest.mark.asyncio
+async def test_api_scale_worker_pool_zero_delta(client: AsyncClient):
+    """Test POST /api/workers/{worker_name}/scale with zero delta."""
+    response = await client.post("/api/workers/celery@worker1/scale?delta=0")
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
+
+
+@pytest.mark.asyncio
+async def test_api_get_active_tasks(client: AsyncClient):
+    """Test GET /api/workers/active-tasks."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.active.return_value = {
+            "celery@worker1": [{"id": "task-1", "name": "myapp.tasks.task1"}]
+        }
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        response = await client.get("/api/workers/active-tasks")
+        assert response.status_code == 200
+        data = response.json()
+        assert "active_tasks" in data
+
+
+@pytest.mark.asyncio
+async def test_api_get_active_tasks_with_worker_filter(client: AsyncClient):
+    """Test GET /api/workers/active-tasks with worker filter."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.destination.return_value = mock_inspect
+        mock_inspect.active.return_value = {
+            "celery@worker1": [{"id": "task-1", "name": "myapp.tasks.task1"}]
+        }
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        response = await client.get("/api/workers/active-tasks?worker_name=celery@worker1")
+        assert response.status_code == 200
+        data = response.json()
+        assert "active_tasks" in data

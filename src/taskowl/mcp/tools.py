@@ -168,3 +168,96 @@ def register_tools(server: MCPServer) -> None:
             )
             response.raise_for_status()
             return response.json()
+
+    @server.tool(
+        name="list_workers",
+        description="List all active Celery workers",
+    )
+    async def list_workers() -> dict:
+        """List all active Celery workers."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/workers/list",
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="get_worker_stats",
+        description="Get detailed statistics for a specific worker",
+    )
+    async def get_worker_stats(worker_name: str) -> dict:
+        """Get detailed statistics for a specific worker.
+
+        Args:
+            worker_name: Name of the worker (e.g., 'celery@worker1')
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/workers/{worker_name}/stats",
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="shutdown_worker",
+        description="Gracefully shutdown a Celery worker",
+    )
+    async def shutdown_worker(worker_name: str) -> dict:
+        """Gracefully shutdown a Celery worker.
+
+        Args:
+            worker_name: Name of the worker to shutdown
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/workers/{worker_name}/shutdown",
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="scale_worker_pool",
+        description="Scale a worker's pool size up or down",
+    )
+    async def scale_worker_pool(worker_name: str, delta: int) -> dict:
+        """Scale a worker's pool size up or down.
+
+        Args:
+            worker_name: Name of the worker
+            delta: Number of processes to add (positive) or remove (negative)
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/workers/{worker_name}/scale",
+                params={"delta": delta},
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="get_active_tasks",
+        description="Get currently executing tasks across all workers or a specific worker",
+    )
+    async def get_active_tasks(worker_name: str | None = None) -> dict:
+        """Get currently executing tasks.
+
+        Args:
+            worker_name: Optional worker name to filter by
+        """
+        async with httpx.AsyncClient() as client:
+            params = {}
+            if worker_name:
+                params["worker_name"] = worker_name
+
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/workers/active-tasks",
+                params=params,
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()

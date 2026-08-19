@@ -99,7 +99,8 @@ class CeleryEventConsumer:
                     )
 
                     logger.info("Starting to capture Celery events...")
-                    recv.capture(limit=None, timeout=None, wakeup=True)
+                    # Use timeout=1.0 to allow periodic checking of shutdown flags
+                    recv.capture(limit=None, timeout=1.0, wakeup=True)
 
             except KeyboardInterrupt:
                 logger.info("Received keyboard interrupt, shutting down...")
