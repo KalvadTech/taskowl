@@ -125,6 +125,7 @@
 - Complete timeline available for each task
 - Better for debugging and analysis than traditional state tables
 - Test data generator publishes realistic events to RabbitMQ for end-to-end testing
+- Consumer uses Celery's built-in graceful shutdown mechanism (`recv.should_stop` + connection close) to avoid reconnection loops
 
 ### Phase 3: REST API & MCP Refactoring ✅ COMPLETE
 **Goal**: Separate concerns - REST API for data access, MCP as a thin wrapper

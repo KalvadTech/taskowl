@@ -5,6 +5,7 @@ with reconnection logic and graceful shutdown.
 """
 
 import asyncio
+import contextlib
 import logging
 import signal
 from typing import Any
@@ -37,6 +38,8 @@ class CeleryEventConsumer:
         self.running = False
         self.shutdown_event = asyncio.Event()
         self._main_loop: asyncio.AbstractEventLoop | None = None
+        self.connection: Connection | None = None
+        self.recv: EventReceiver | None = None
 
     def _create_handlers(self) -> dict[str, Any]:
         """Create event handler mapping for Celery receiver."""
@@ -82,7 +85,8 @@ class CeleryEventConsumer:
 
         while self.running and not self.shutdown_event.is_set():
             try:
-                with Connection(self.broker_url) as connection:
+                self.connection = Connection(self.broker_url)
+                with self.connection:
                     logger.info("Connected to Celery broker")
 
                     def on_event(event: dict) -> None:
@@ -91,16 +95,15 @@ class CeleryEventConsumer:
                         if event_type in handlers:
                             handlers[event_type](event)
 
-                    recv: EventReceiver = self.app.events.Receiver(
-                        connection,
+                    self.recv = self.app.events.Receiver(
+                        self.connection,
                         handlers={
                             "*": on_event,
                         },
                     )
 
                     logger.info("Starting to capture Celery events...")
-                    # Use timeout=1.0 to allow periodic checking of shutdown flags
-                    recv.capture(limit=None, timeout=1.0, wakeup=True)
+                    self.recv.capture(limit=None, timeout=None, wakeup=True)
 
             except KeyboardInterrupt:
                 logger.info("Received keyboard interrupt, shutting down...")
@@ -116,6 +119,9 @@ class CeleryEventConsumer:
                     import time
 
                     time.sleep(0.1)
+            finally:
+                self.connection = None
+                self.recv = None
 
     async def start(self) -> None:
         """Start consuming events."""
@@ -132,6 +138,13 @@ class CeleryEventConsumer:
             logger.info("Received shutdown signal")
             self.running = False
             self.shutdown_event.set()
+
+            # Graceful shutdown using Celery's built-in mechanism
+            if self.recv:
+                self.recv.should_stop = True
+            if self.connection:
+                with contextlib.suppress(Exception):
+                    self.connection.close()
 
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, handle_signal)
