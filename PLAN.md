@@ -20,8 +20,9 @@
 
 ```
 ┌─────────────────┐
-│  RabbitMQ       │◄─────── Celery workers publish events
-│  (Broker)       │
+│  Broker         │◄─────── Celery workers publish events
+│  (RabbitMQ,     │
+│   Redis, ...)   │
 └────────┬────────┘
          │
          │ Consume events
@@ -124,7 +125,7 @@
 - State is reconstructed from latest events using DISTINCT ON queries
 - Complete timeline available for each task
 - Better for debugging and analysis than traditional state tables
-- Test data generator publishes realistic events to RabbitMQ for end-to-end testing
+- Test data generator publishes realistic events to the broker for end-to-end testing
 - Consumer uses Celery's built-in graceful shutdown mechanism (`recv.should_stop` + connection close) to avoid reconnection loops
 
 ### Phase 3: REST API & MCP Refactoring ✅ COMPLETE
@@ -456,9 +457,13 @@ dev = [
 
 ## Future Enhancements (Post-MVP)
 
-- **Alerts**: notify on failures, slow tasks, worker down
-- **Multi-broker support**: ~~Redis~~ (done), SQS
-- **Metrics export**: Prometheus, OpenTelemetry
+- **Orphan detection**: detect tasks stuck in STARTED whose worker went offline; add ORPHANED state reconstruction and list-orphans / bulk-retry tools (REST + MCP)
+- **Worker offline detection**: timeout-based worker status (heartbeat within N seconds = online, otherwise offline); configurable threshold
+- **Alerts / webhook notifications**: event-driven notifications on task failure, worker offline, and slow tasks; delivered via generic webhook (Slack/Discord); configured via env
+- **Workflow automation**: full trigger → conditions → actions engine with retry orchestration, circuit breakers, and Slack integration (superset of alerts)
+- **Prometheus metrics**: `/metrics` endpoint exposing task event counters, execution duration histogram, and worker status gauges derived from Celery events
+- **Task progress tracking**: support custom `task-steps` / `task-progress` events; optional helper for emitting progress from tasks; surface progress in task detail
+- **Retry chain visualization**: surface parent/child relationships (root_id/parent_id) in get_task, showing original → retry_1 → retry_2 chain
 - **Task result storage**: optional result backend integration
 
 ## Completed Enhancements
@@ -466,7 +471,7 @@ dev = [
 - **Authentication** ✅: API key authentication for REST API and MCP server via `API_KEY` environment variable
 - **Write Capabilities** ✅: Task revocation and retry via REST API endpoints and MCP tools
 - **Worker Management** ✅: Worker listing, statistics, shutdown, pool scaling, and active task monitoring via REST API and MCP tools
-- **Redis Broker Support** ✅: taskowl works with Redis as the Celery broker via `CELERY_BROKER_URL`; test data generator is transport-aware (topic for AMQP, fanout for Redis)
+- **Redis Broker Support** ✅: taskowl works with Redis as the Celery broker via `CELERY_BROKER_URL`; test data generator is transport-aware (topic for AMQP, fanout for Redis). Multi-broker support complete (RabbitMQ + Redis)
 
 ## License
 
