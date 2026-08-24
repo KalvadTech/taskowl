@@ -24,6 +24,7 @@ dependencies = [
     "mcp==2.0.0",
     "pydantic==2.13.4",
     "pydantic-settings==2.15.0",
+    "redis==8.1.0",
 ]
 
 [dependency-groups]

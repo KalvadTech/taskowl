@@ -11,7 +11,10 @@ class Settings(BaseSettings):
     )
     celery_broker_url: str = Field(
         default="amqp://guest:guest@localhost:5672//",
-        description="RabbitMQ connection string",
+        description=(
+            "Celery broker URL (RabbitMQ, Redis, or other kombu-supported "
+            "transport, e.g. amqp://..., redis://...)"
+        ),
     )
     taskowl_host: str = Field(
         default="0.0.0.0",

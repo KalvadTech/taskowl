@@ -18,7 +18,7 @@ Modern Celery task monitoring with MCP integration. No UI, just data.
 
 - Python 3.14+
 - PostgreSQL 14+
-- RabbitMQ (or other Celery broker)
+- A Celery broker: RabbitMQ (or LavinMQ), Redis, etc.
 - [uv](https://github.com/astral-sh/uv) package manager
 
 ### Installation
@@ -304,13 +304,30 @@ All configuration is via environment variables:
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://localhost:5432/taskowl` | Yes |
-| `CELERY_BROKER_URL` | RabbitMQ connection string | `amqp://guest:guest@localhost:5672//` | Yes |
+| `CELERY_BROKER_URL` | Celery broker URL (RabbitMQ, Redis, etc.) | `amqp://guest:guest@localhost:5672//` | Yes |
 | `TASKOWL_HOST` | FastAPI server host | `0.0.0.0` | No |
 | `TASKOWL_PORT` | FastAPI server port | `8000` | No |
 | `MCP_HOST` | MCP server host | `0.0.0.0` | No |
 | `MCP_PORT` | MCP server port | `8001` | No |
 | `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` | No |
 | `API_KEY` | API key for authentication (optional) | None (disabled) | No |
+
+### Brokers
+
+taskowl supports any Celery/kombu broker via `CELERY_BROKER_URL`. Examples:
+
+```bash
+# RabbitMQ / LavinMQ
+export CELERY_BROKER_URL="amqp://guest:guest@localhost:5672//"
+
+# Redis
+export CELERY_BROKER_URL="redis://localhost:6379/0"
+```
+
+The consumer, worker management, and task actions all use Celery's broker
+abstraction, so no code changes are needed when switching brokers. The test
+data generator (`scripts/generate_test_data.py`) automatically uses the right
+exchange type for the broker (topic for AMQP, fanout for Redis).
 
 ## Authentication
 

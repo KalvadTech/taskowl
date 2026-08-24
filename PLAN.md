@@ -438,7 +438,7 @@ dev = [
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://localhost:5432/taskowl` | Yes |
-| `CELERY_BROKER_URL` | RabbitMQ connection string | `amqp://guest:guest@localhost:5672//` | Yes |
+| `CELERY_BROKER_URL` | Celery broker URL (RabbitMQ, Redis, etc.) | `amqp://guest:guest@localhost:5672//` | Yes |
 | `TASKOWL_HOST` | FastAPI server host | `0.0.0.0` | No |
 | `TASKOWL_PORT` | FastAPI server port | `8000` | No |
 | `MCP_HOST` | MCP server host | `0.0.0.0` | No |
@@ -457,7 +457,7 @@ dev = [
 ## Future Enhancements (Post-MVP)
 
 - **Alerts**: notify on failures, slow tasks, worker down
-- **Multi-broker support**: Redis, SQS
+- **Multi-broker support**: ~~Redis~~ (done), SQS
 - **Metrics export**: Prometheus, OpenTelemetry
 - **Task result storage**: optional result backend integration
 
@@ -466,6 +466,7 @@ dev = [
 - **Authentication** ✅: API key authentication for REST API and MCP server via `API_KEY` environment variable
 - **Write Capabilities** ✅: Task revocation and retry via REST API endpoints and MCP tools
 - **Worker Management** ✅: Worker listing, statistics, shutdown, pool scaling, and active task monitoring via REST API and MCP tools
+- **Redis Broker Support** ✅: taskowl works with Redis as the Celery broker via `CELERY_BROKER_URL`; test data generator is transport-aware (topic for AMQP, fanout for Redis)
 
 ## License
 

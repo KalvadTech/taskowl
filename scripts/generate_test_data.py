@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate realistic Celery events and publish to RabbitMQ for testing."""
+"""Generate realistic Celery events and publish to the broker for testing."""
 
 import argparse
 import json
@@ -188,18 +188,25 @@ def generate_worker_offline_event(worker: str) -> dict:
     }
 
 
+def _build_exchange(broker_url: str) -> Exchange:
+    """Build the events exchange appropriate for the broker transport.
+
+    Celery uses a ``topic`` exchange for AMQP transports and a ``fanout``
+    exchange for Redis, where fanout messages are routed through pub/sub.
+    """
+    if broker_url.startswith("redis"):
+        return Exchange("celeryev", type="fanout", durable=False)
+    return Exchange("celeryev", type="topic", durable=False)
+
+
 def publish_event(connection: Connection, exchange: Exchange, event: dict) -> None:
-    """Publish a single event to RabbitMQ."""
+    """Publish a single Celery event."""
     producer = connection.Producer(serializer="json")
     event_type = event["type"]
 
-    # Determine routing key based on event type
-    if event_type.startswith("task-"):
-        routing_key = "task.#"
-    elif event_type.startswith("worker-"):
-        routing_key = "worker.#"
-    else:
-        routing_key = "#"
+    # Celery dispatches events with the routing key derived from the
+    # event type (e.g. 'task-received' -> 'task.received').
+    routing_key = event_type.replace("-", ".")
 
     producer.publish(
         event,
@@ -363,7 +370,7 @@ def main():
         "--broker-url",
         type=str,
         default=os.getenv("CELERY_BROKER_URL", "amqp://guest:guest@localhost:5672//"),
-        help="RabbitMQ broker URL (default: from CELERY_BROKER_URL env or amqp://guest:guest@localhost:5672//)",
+        help="Broker URL (default: from CELERY_BROKER_URL env or amqp://guest:guest@localhost:5672//)",
     )
 
     args = parser.parse_args()
@@ -374,7 +381,7 @@ def main():
         print(f"Error: Percentages must sum to 100 (got {total})")
         return
 
-    print(f"Connecting to RabbitMQ at {args.broker_url}")
+    print(f"Connecting to broker at {args.broker_url}")
     print(f"Generating {args.tasks} tasks...")
     print(f"  - Success: {args.success}% ({int(args.tasks * args.success / 100)} tasks)")
     print(f"  - Failure: {args.failure}% ({int(args.tasks * args.failure / 100)} tasks)")
@@ -382,10 +389,11 @@ def main():
     print(f"  - Slow tasks: {args.slow_tasks}")
     print()
 
-    # Connect to RabbitMQ
+    # Connect to the broker
     with Connection(args.broker_url) as connection:
-        # Create celeryev exchange
-        exchange = Exchange("celeryev", type="topic", durable=False)
+        # Build the events exchange based on the transport (topic for AMQP,
+        # fanout for Redis)
+        exchange = _build_exchange(args.broker_url)
 
         print("Publishing events (with delays)...")
 
