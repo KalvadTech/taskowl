@@ -478,7 +478,8 @@ async def test_get_worker_status_with_data(db_session: AsyncSession):
 
     # Find worker1
     worker1 = next(w for w in result if w["hostname"] == "worker1@localhost")
-    assert worker1["status"] == "heartbeat"  # Latest status
+    assert worker1["status"] == "online"  # Recent heartbeat
+    assert worker1["last_event"] == "heartbeat"
     assert worker1["active"] == 2
     assert worker1["processed"] == 100
     # Note: sw_ident, sw_ver, sw_sys are only in the "online" event, not in "heartbeat"
@@ -488,3 +489,101 @@ async def test_get_worker_status_with_data(db_session: AsyncSession):
     # Find worker2
     worker2 = next(w for w in result if w["hostname"] == "worker2@localhost")
     assert worker2["status"] == "online"
+
+
+@pytest.mark.asyncio
+async def test_worker_status_stale_heartbeat(db_session: AsyncSession):
+    """Worker with a stale heartbeat should be offline."""
+    now = datetime.now(UTC)
+    db_session.add(
+        WorkerEvent(
+            event_type="heartbeat",
+            hostname="worker1@localhost",
+            timestamp=now - timedelta(seconds=120),
+        )
+    )
+    await db_session.commit()
+
+    result = await get_worker_status_query(session=db_session)
+    assert len(result) == 1
+    assert result[0]["status"] == "offline"
+    assert result[0]["last_event"] == "heartbeat"
+
+
+@pytest.mark.asyncio
+async def test_worker_status_explicit_offline(db_session: AsyncSession):
+    """Worker with an explicit offline event should be offline."""
+    now = datetime.now(UTC)
+    db_session.add(
+        WorkerEvent(
+            event_type="offline",
+            hostname="worker1@localhost",
+            timestamp=now,
+        )
+    )
+    await db_session.commit()
+
+    result = await get_worker_status_query(session=db_session)
+    assert len(result) == 1
+    assert result[0]["status"] == "offline"
+    assert result[0]["last_event"] == "offline"
+
+
+@pytest.mark.asyncio
+async def test_worker_status_recent_online(db_session: AsyncSession):
+    """Worker with a recent online event should be online."""
+    now = datetime.now(UTC)
+    db_session.add(
+        WorkerEvent(
+            event_type="online",
+            hostname="worker1@localhost",
+            timestamp=now - timedelta(seconds=5),
+        )
+    )
+    await db_session.commit()
+
+    result = await get_worker_status_query(session=db_session)
+    assert len(result) == 1
+    assert result[0]["status"] == "online"
+
+
+@pytest.mark.asyncio
+async def test_worker_status_unknown_when_no_events(db_session: AsyncSession):
+    """Workers with no events should not appear (no rows to derive from)."""
+    result = await get_worker_status_query(session=db_session)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_worker_status_mixed(db_session: AsyncSession):
+    """Mixed workers should get correct per-worker status."""
+    now = datetime.now(UTC)
+    db_session.add(
+        WorkerEvent(
+            event_type="heartbeat",
+            hostname="worker-online@localhost",
+            timestamp=now - timedelta(seconds=5),
+        )
+    )
+    db_session.add(
+        WorkerEvent(
+            event_type="heartbeat",
+            hostname="worker-stale@localhost",
+            timestamp=now - timedelta(seconds=120),
+        )
+    )
+    db_session.add(
+        WorkerEvent(
+            event_type="offline",
+            hostname="worker-offline@localhost",
+            timestamp=now - timedelta(seconds=5),
+        )
+    )
+    await db_session.commit()
+
+    result = await get_worker_status_query(session=db_session)
+    statuses = {w["hostname"]: w["status"] for w in result}
+
+    assert statuses["worker-online@localhost"] == "online"
+    assert statuses["worker-stale@localhost"] == "offline"
+    assert statuses["worker-offline@localhost"] == "offline"

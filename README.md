@@ -154,7 +154,7 @@ curl "http://localhost:8000/api/tasks/orphaned"
 
 #### GET /api/workers
 
-Get status of all Celery workers.
+Get status of all Celery workers. The `status` field is derived from worker events: `online` if a heartbeat was received within `WORKER_OFFLINE_TIMEOUT_SECONDS`, `offline` if the worker sent an offline event or its last heartbeat is stale, and `unknown` if no worker events exist. `last_event` contains the raw last event type.
 
 **Example:**
 ```bash
@@ -529,7 +529,7 @@ What's the task success rate in the last 30 minutes?
 
 ### get_worker_status
 
-Get status of all Celery workers reconstructed from the latest events.
+Get status of all Celery workers, derived from the latest events (`online` / `offline` / `unknown` based on `WORKER_OFFLINE_TIMEOUT_SECONDS`).
 
 **Example:**
 ```

@@ -312,7 +312,8 @@ async def test_api_get_workers_with_data(client: AsyncClient, db_session: AsyncS
     data = response.json()
     assert len(data) == 1
     assert data[0]["hostname"] == "worker1@localhost"
-    assert data[0]["status"] == "heartbeat"
+    assert data[0]["status"] == "online"
+    assert data[0]["last_event"] == "heartbeat"
     assert data[0]["active"] == 2
     assert data[0]["processed"] == 100
 

@@ -368,11 +368,13 @@ async def _get_worker_status_impl(session: AsyncSession) -> list[dict]:
     result = await session.execute(query)
     events = result.scalars().all()
 
+    now = datetime.now(UTC)
     worker_list = []
     for event in events:
         worker_info = {
             "hostname": event.hostname,
-            "status": event.event_type,
+            "status": _worker_status(event, now),
+            "last_event": event.event_type,
             "last_heartbeat": event.timestamp.isoformat(),
         }
 
@@ -393,6 +395,26 @@ async def _get_worker_status_impl(session: AsyncSession) -> list[dict]:
         worker_list.append(worker_info)
 
     return worker_list
+
+
+def _worker_status(event: WorkerEvent, now: datetime) -> str:
+    """Derive a worker's status from its latest event and the offline timeout.
+
+    Returns:
+        "offline" if the latest event is an offline event or the last
+        heartbeat is stale, "online" if the worker has a recent heartbeat,
+        or "unknown" if there is no event data.
+    """
+    timeout = timedelta(seconds=settings.worker_offline_timeout_seconds)
+
+    if event.event_type == "offline":
+        return "offline"
+    # Normalize timezone (SQLite returns naive datetimes)
+    event_ts = _ensure_utc(event.timestamp)
+    if now - event_ts > timeout:
+        # Stale heartbeat/online -> worker presumed dead
+        return "offline"
+    return "online"
 
 
 async def _worker_is_offline(
