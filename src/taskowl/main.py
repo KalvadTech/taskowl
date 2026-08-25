@@ -18,6 +18,7 @@ from taskowl.queries import (
     get_task_summary_query,
     get_task_timeline_query,
     get_worker_status_query,
+    list_orphaned_tasks_query,
     list_tasks_query,
 )
 from taskowl.workers import (
@@ -111,6 +112,16 @@ async def api_get_task_summary(
     """Get aggregate task statistics."""
     result = await get_task_summary_query(hours, session)
     return TaskSummary(**result)
+
+
+@app.get("/api/tasks/orphaned")
+async def api_list_orphaned_tasks(
+    limit: int = 100,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> list[dict]:
+    """List tasks currently considered orphaned."""
+    return await list_orphaned_tasks_query(limit, session)
 
 
 @app.get("/api/tasks/{task_id}")

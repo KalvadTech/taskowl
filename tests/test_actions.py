@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from taskowl.actions import retry_task, revoke_task
-from taskowl.models import TaskEvent
+from taskowl.models import TaskEvent, WorkerEvent
 
 
 @pytest.mark.asyncio
@@ -235,7 +235,7 @@ async def test_retry_task_wrong_state(db_session: AsyncSession):
 
     assert "error" in result
     assert "succeeded" in result["error"]
-    assert "Only failed or revoked tasks can be retried" in result["error"]
+    assert "Only failed, revoked, or orphaned tasks can be retried" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -323,3 +323,49 @@ async def test_retry_task_celery_error(db_session: AsyncSession):
 
         assert "error" in result
         assert "Failed to retry task" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_retry_orphaned_task(db_session: AsyncSession):
+    """Test retrying an orphaned task succeeds."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now - timedelta(seconds=301),
+            hostname="worker1@localhost",
+            name="test_task",
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="started",
+            task_id=task_id,
+            timestamp=now - timedelta(seconds=300),
+            hostname="worker1@localhost",
+        )
+    )
+    # Worker went offline long ago
+    db_session.add(
+        WorkerEvent(
+            event_type="offline",
+            hostname="worker1@localhost",
+            timestamp=now - timedelta(seconds=120),
+        )
+    )
+    await db_session.commit()
+
+    with patch("taskowl.actions._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_result = MagicMock()
+        mock_result.id = "new-task-id-orphan"
+        mock_app.send_task.return_value = mock_result
+        mock_get_app.return_value = mock_app
+
+        result = await retry_task(str(task_id), session=db_session)
+
+        assert result["status"] == "success"
+        assert result["new_task_id"] == "new-task-id-orphan"

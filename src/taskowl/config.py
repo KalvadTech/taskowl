@@ -40,6 +40,14 @@ class Settings(BaseSettings):
         default=None,
         description="API key for authentication (optional, no auth if not set)",
     )
+    orphan_grace_seconds: int = Field(
+        default=60,
+        description="Wait after task started before flagging as orphan",
+    )
+    worker_offline_timeout_seconds: int = Field(
+        default=30,
+        description="No heartbeat for this long means worker is offline",
+    )
 
     model_config = {"env_prefix": "", "case_sensitive": False}
 

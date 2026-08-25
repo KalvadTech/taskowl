@@ -124,6 +124,34 @@ Get aggregate task statistics.
 curl "http://localhost:8000/api/tasks/summary?hours=24"
 ```
 
+#### GET /api/tasks/orphaned
+
+List tasks currently considered orphaned (stuck in `STARTED` state whose worker went offline).
+
+**Query Parameters:**
+- `limit` (optional): Max number of tasks to return (default: 100)
+
+**Example:**
+```bash
+curl "http://localhost:8000/api/tasks/orphaned"
+```
+
+**Response:**
+```json
+[
+  {
+    "id": "abc-123-def",
+    "name": "myapp.tasks.process_data",
+    "state": "orphaned",
+    "worker": "celery@worker1",
+    "queue": "default",
+    "started_at": "2026-08-24T14:03:00Z"
+  }
+]
+```
+
+**Note:** A task is orphaned when it is in `STARTED` state, its `started` timestamp is older than `ORPHAN_GRACE_SECONDS`, and its worker has been offline for longer than `WORKER_OFFLINE_TIMEOUT_SECONDS`.
+
 #### GET /api/workers
 
 Get status of all Celery workers.
@@ -295,7 +323,7 @@ curl -X POST "http://localhost:8000/api/tasks/abc-123-def/retry"
 }
 ```
 
-**Note:** Only tasks in `failed` or `revoked` state can be retried. Attempting to retry a task in any other state will return an error.
+**Note:** Only tasks in `failed`, `revoked`, or `orphaned` state can be retried. Attempting to retry a task in any other state will return an error.
 
 ## Configuration
 
@@ -311,6 +339,8 @@ All configuration is via environment variables:
 | `MCP_PORT` | MCP server port | `8001` | No |
 | `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` | No |
 | `API_KEY` | API key for authentication (optional) | None (disabled) | No |
+| `ORPHAN_GRACE_SECONDS` | Wait after task started before flagging as orphan | `60` | No |
+| `WORKER_OFFLINE_TIMEOUT_SECONDS` | No heartbeat for this long means worker is offline | `30` | No |
 
 ### Brokers
 
@@ -440,6 +470,20 @@ Show me failed tasks from the last hour
 ```
 
 **Calls:** `GET /api/tasks`
+
+### list_orphaned_tasks
+
+List tasks currently considered orphaned (stuck in `STARTED` state whose worker went offline).
+
+**Parameters:**
+- `limit` (optional): Max number of tasks to return (default: 100)
+
+**Example:**
+```
+Which tasks are orphaned?
+```
+
+**Calls:** `GET /api/tasks/orphaned`
 
 ### get_task
 

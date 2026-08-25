@@ -61,6 +61,27 @@ def register_tools(server: MCPServer) -> None:
             return response.json()
 
     @server.tool(
+        name="list_orphaned_tasks",
+        description=(
+            "List tasks currently considered orphaned (stuck in STARTED with worker offline)"
+        ),
+    )
+    async def list_orphaned_tasks(limit: int = 100) -> list[dict]:
+        """List tasks currently considered orphaned.
+
+        Args:
+            limit: Max number of tasks to return (default: 100)
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks/orphaned",
+                params={"limit": limit},
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
         name="get_task",
         description="Get detailed information about a specific task",
     )

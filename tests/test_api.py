@@ -746,3 +746,71 @@ async def test_api_get_active_tasks_with_worker_filter(client: AsyncClient):
         assert response.status_code == 200
         data = response.json()
         assert "active_tasks" in data
+
+
+@pytest.mark.asyncio
+async def test_api_list_orphaned_tasks_empty(client: AsyncClient):
+    """Test GET /api/tasks/orphaned with no orphaned tasks."""
+    response = await client.get("/api/tasks/orphaned")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_api_list_orphaned_tasks_with_data(client: AsyncClient, db_session: AsyncSession):
+    """Test GET /api/tasks/orphaned with an orphaned task."""
+    now = datetime.now(UTC)
+    task_id = uuid.uuid4()
+
+    db_session.add(
+        TaskEvent(
+            event_type="started",
+            task_id=task_id,
+            timestamp=now - timedelta(seconds=300),
+            hostname="worker1@localhost",
+        )
+    )
+    db_session.add(
+        WorkerEvent(
+            event_type="offline",
+            hostname="worker1@localhost",
+            timestamp=now - timedelta(seconds=120),
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/tasks/orphaned")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == str(task_id)
+    assert data[0]["state"] == "orphaned"
+
+
+@pytest.mark.asyncio
+async def test_api_get_task_reports_orphaned(client: AsyncClient, db_session: AsyncSession):
+    """Test GET /api/tasks/{task_id} reports orphaned flag."""
+    now = datetime.now(UTC)
+    task_id = uuid.uuid4()
+
+    db_session.add(
+        TaskEvent(
+            event_type="started",
+            task_id=task_id,
+            timestamp=now - timedelta(seconds=300),
+            hostname="worker1@localhost",
+        )
+    )
+    db_session.add(
+        WorkerEvent(
+            event_type="offline",
+            hostname="worker1@localhost",
+            timestamp=now - timedelta(seconds=120),
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get(f"/api/tasks/{task_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["orphaned"] is True

@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from taskowl.config import settings
 from taskowl.database import async_session_maker
 from taskowl.models import TaskEvent, WorkerEvent
 
@@ -172,6 +173,11 @@ async def _get_task_impl(session: AsyncSession, task_uuid: uuid.UUID, task_id: s
     # Set current state from last event
     task_state["state"] = events[-1].event_type
     task_state["worker"] = events[-1].hostname
+
+    # Compute orphan status (query-time detection)
+    task_state["orphaned"] = await _task_is_orphaned_impl(
+        session, task_uuid, events[-1], datetime.now(UTC)
+    )
 
     return task_state
 
@@ -387,3 +393,127 @@ async def _get_worker_status_impl(session: AsyncSession) -> list[dict]:
         worker_list.append(worker_info)
 
     return worker_list
+
+
+async def _worker_is_offline(
+    session: AsyncSession,
+    hostname: str,
+    now: datetime,
+    offline_timeout: timedelta,
+) -> bool:
+    """Determine whether a worker is offline based on its latest event."""
+    query = (
+        select(WorkerEvent)
+        .where(WorkerEvent.hostname == hostname)
+        .order_by(WorkerEvent.timestamp.desc())
+        .limit(1)
+    )
+    result = await session.execute(query)
+    event = result.scalar_one_or_none()
+
+    if event is None:
+        # No worker events at all -> assume offline
+        return True
+    if event.event_type == "offline":
+        return True
+    # Normalize timezone (SQLite returns naive datetimes)
+    event_ts = _ensure_utc(event.timestamp)
+    # Stale heartbeat/online -> worker presumed dead
+    return now - event_ts > offline_timeout
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    """Ensure a datetime is timezone-aware (assume UTC if naive)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
+
+
+async def _task_is_orphaned_impl(
+    session: AsyncSession,
+    task_uuid: uuid.UUID,
+    latest_event: TaskEvent,
+    now: datetime,
+) -> bool:
+    """Check whether a task is orphaned given its latest event."""
+    grace = timedelta(seconds=settings.orphan_grace_seconds)
+    offline_timeout = timedelta(seconds=settings.worker_offline_timeout_seconds)
+
+    # Rule 1: latest event must be 'started'
+    if latest_event.event_type != "started":
+        return False
+
+    # Rule 2: started must be older than the grace period
+    # Normalize timezone (SQLite returns naive datetimes)
+    event_ts = _ensure_utc(latest_event.timestamp)
+    if now - event_ts <= grace:
+        return False
+
+    # Rule 3: the worker must be offline
+    if not latest_event.hostname:
+        return False
+    return await _worker_is_offline(session, latest_event.hostname, now, offline_timeout)
+
+
+async def list_orphaned_tasks_query(
+    limit: int = 100,
+    session: AsyncSession | None = None,
+) -> list[dict]:
+    """List tasks currently considered orphaned.
+
+    A task is orphaned when it is stuck in STARTED state and its worker went
+    offline (crashed / network drop) before sending a completion event.
+
+    Args:
+        limit: Max number of tasks to return (default: 100)
+        session: Optional database session (for testing)
+
+    Returns:
+        List of orphaned task dictionaries
+    """
+    if session is None:
+        async with async_session_maker() as session:
+            return await _list_orphaned_tasks_impl(session, limit)
+    return await _list_orphaned_tasks_impl(session, limit)
+
+
+async def _list_orphaned_tasks_impl(session: AsyncSession, limit: int) -> list[dict]:
+    """Internal implementation of list_orphaned_tasks_query."""
+    from sqlalchemy import func as sql_func
+
+    now = datetime.now(UTC)
+
+    # Subquery to get max timestamp per task
+    max_timestamps = (
+        select(
+            TaskEvent.task_id,
+            sql_func.max(TaskEvent.timestamp).label("max_ts"),
+        )
+        .group_by(TaskEvent.task_id)
+        .subquery()
+    )
+
+    # Get the latest event per task
+    latest_events_query = select(TaskEvent).join(
+        max_timestamps,
+        (TaskEvent.task_id == max_timestamps.c.task_id)
+        & (TaskEvent.timestamp == max_timestamps.c.max_ts),
+    )
+    result = await session.execute(latest_events_query)
+    latest_events = result.scalars().all()
+
+    orphaned_tasks = []
+    for event in latest_events:
+        if await _task_is_orphaned_impl(session, event.task_id, event, now):
+            orphaned_tasks.append(
+                {
+                    "id": str(event.task_id),
+                    "name": event.name,
+                    "state": "orphaned",
+                    "worker": event.hostname,
+                    "queue": event.queue,
+                    "started_at": event.timestamp.isoformat(),
+                }
+            )
+
+    return orphaned_tasks[:limit]

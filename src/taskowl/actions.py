@@ -5,6 +5,7 @@ This module contains the core logic for task write operations
 """
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from celery import Celery
 from sqlalchemy import select
@@ -12,12 +13,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from taskowl.config import settings
 from taskowl.database import async_session_maker
-from taskowl.models import TaskEvent
+from taskowl.models import TaskEvent, WorkerEvent
 
 
 def _get_celery_app() -> Celery:
     """Get Celery app instance configured with broker URL."""
     return Celery(broker=settings.celery_broker_url)
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    """Ensure a datetime is timezone-aware (assume UTC if naive)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
 
 
 async def _task_exists(session: AsyncSession, task_uuid: uuid.UUID) -> bool:
@@ -56,7 +64,43 @@ async def _get_task_info(session: AsyncSession, task_uuid: uuid.UUID) -> dict | 
         if event.queue:
             task_info["queue"] = event.queue
 
+    # Detect orphaned state (stuck in STARTED with worker offline)
+    if await _task_is_orphaned(session, events[-1], datetime.now(UTC)):
+        task_info["state"] = "orphaned"
+
     return task_info
+
+
+async def _task_is_orphaned(session: AsyncSession, latest_event: TaskEvent, now: datetime) -> bool:
+    """Check whether a task is orphaned given its latest event."""
+    grace = timedelta(seconds=settings.orphan_grace_seconds)
+    offline_timeout = timedelta(seconds=settings.worker_offline_timeout_seconds)
+
+    if latest_event.event_type != "started":
+        return False
+    # Normalize timezone (SQLite returns naive datetimes)
+    event_ts = _ensure_utc(latest_event.timestamp)
+    if now - event_ts <= grace:
+        return False
+    if not latest_event.hostname:
+        return False
+
+    # Determine if the worker is offline
+    worker_query = (
+        select(WorkerEvent)
+        .where(WorkerEvent.hostname == latest_event.hostname)
+        .order_by(WorkerEvent.timestamp.desc())
+        .limit(1)
+    )
+    worker_result = await session.execute(worker_query)
+    worker_event = worker_result.scalar_one_or_none()
+
+    if worker_event is None:
+        return True
+    if worker_event.event_type == "offline":
+        return True
+    worker_ts = _ensure_utc(worker_event.timestamp)
+    return now - worker_ts > offline_timeout
 
 
 async def revoke_task(
@@ -133,11 +177,11 @@ async def retry_task(
         return {"error": f"Task not found: {task_id}"}
 
     # Check if task is in a retryable state
-    if task_info["state"] not in ["failed", "revoked"]:
+    if task_info["state"] not in ["failed", "revoked", "orphaned"]:
         return {
             "error": (
                 f"Task is in '{task_info['state']}' state. "
-                "Only failed or revoked tasks can be retried."
+                "Only failed, revoked, or orphaned tasks can be retried."
             )
         }
 
