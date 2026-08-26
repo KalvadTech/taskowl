@@ -5,7 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from taskowl.actions import retry_task, revoke_task
 from taskowl.auth import verify_api_key
 from taskowl.config import settings
 from taskowl.database import close_db, get_db, init_db
+from taskowl.metrics import generate_metrics
 from taskowl.queries import (
     get_task_query,
     get_task_summary_query,
@@ -73,6 +74,20 @@ class TaskSummary(BaseModel):
 async def health_check() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+# NOTE: This endpoint is intentionally UNAUTHENTICATED so Prometheus can
+# scrape it without sending the taskowl API key. Ensure it is only reachable
+# from trusted networks or behind a reverse proxy.
+# TODO: consider network-level auth or a separate scraper token if exposed
+# beyond a trusted network.
+@app.get("/metrics")
+async def metrics(session: AsyncSession = Depends(get_db)) -> Response:
+    """Prometheus metrics endpoint."""
+    return Response(
+        content=await generate_metrics(session),
+        media_type="text/plain; version=0.0.4",
+    )
 
 
 @app.get("/")

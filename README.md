@@ -392,6 +392,40 @@ Alerts are sent as Slack-formatted payloads (with attachments/fields) containing
 task metadata only — task name, task ID, worker, error message, runtime. Args,
 kwargs, and results are never sent to the webhook.
 
+### Prometheus Metrics
+
+taskowl exposes a Prometheus `/metrics` endpoint on the API server for scraping
+task and worker telemetry. Metrics are computed on-scrape from the append-only
+event tables, so they always reflect current database contents.
+
+```bash
+curl http://localhost:8000/metrics
+```
+
+**Example Prometheus scrape config:**
+```yaml
+scrape_configs:
+  - job_name: taskowl
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["localhost:8000"]
+```
+
+**Exposed metrics:**
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `taskowl_task_events_total` | Counter | `event_type`, `task_name`, `worker` |
+| `taskowl_task_execution_duration_seconds` | Histogram | `task_name` |
+| `taskowl_worker_status` | Gauge (1 = online, 0 = offline) | `worker` |
+| `taskowl_worker_active_tasks` | Gauge | `worker` |
+| `taskowl_worker_processed_total` | Counter | `worker` |
+
+> **Security note:** `/metrics` is intentionally unauthenticated so Prometheus
+> can scrape it without the taskowl API key. Only expose it to trusted networks
+> or behind a reverse proxy.
+
 ## Authentication
 
 taskowl supports optional API key authentication for both the REST API and MCP server. When `API_KEY` is set, all requests must include a valid Bearer token.

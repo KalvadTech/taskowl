@@ -458,7 +458,6 @@ dev = [
 ## Future Enhancements (Post-MVP)
 
 - **Workflow automation**: full trigger → conditions → actions engine with retry orchestration, circuit breakers, and Slack integration (superset of alerts)
-- **Prometheus metrics**: `/metrics` endpoint exposing task event counters, execution duration histogram, and worker status gauges derived from Celery events
 - **Retry chain visualization**: surface parent/child relationships (root_id/parent_id) in get_task, showing original → retry_1 → retry_2 chain
 - **Task result storage**: optional result backend integration
 
@@ -471,6 +470,7 @@ dev = [
 - **Orphan Detection (V1)** ✅: query-time detection of tasks stuck in STARTED whose worker went offline; `GET /api/tasks/orphaned` endpoint, `list_orphaned_tasks` MCP tool, `orphaned` flag in task detail, and orphaned-task retry. Configurable via `ORPHAN_GRACE_SECONDS` and `WORKER_OFFLINE_TIMEOUT_SECONDS`. Background scanner deferred to alerting work
 - **Worker Offline Detection** ✅: `GET /api/workers` (and MCP `get_worker_status`) now derive worker status as `online`/`offline`/`unknown` based on `WORKER_OFFLINE_TIMEOUT_SECONDS`; raw last event exposed as `last_event` (append-only, no UPDATE)
 - **Alerts / Webhooks (v1)** ✅: Slack-compatible webhook alerts for task failures, worker offline (event + periodic stale-heartbeat check), and slow tasks; metadata-only payloads; configured via `ALERT_WEBHOOK_URL`, `ALERT_ON_TASK_FAILED`, `ALERT_ON_WORKER_OFFLINE`, `ALERT_SLOW_TASK_SECONDS`, `ALERT_WORKER_CHECK_SECONDS`
+- **Prometheus Metrics** ✅: `/metrics` endpoint on the API server exposing `taskowl_task_events_total`, `taskowl_task_execution_duration_seconds`, `taskowl_worker_status`, `taskowl_worker_active_tasks`, `taskowl_worker_processed_total`; computed on-scrape from event tables using `prometheus-client`; intentionally unauthenticated (network-level protection advised)
 
 ## License
 
