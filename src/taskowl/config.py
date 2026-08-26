@@ -48,6 +48,26 @@ class Settings(BaseSettings):
         default=30,
         description="No heartbeat for this long means worker is offline",
     )
+    alert_webhook_url: str | None = Field(
+        default=None,
+        description="Slack webhook URL to post alerts to (disabled if not set)",
+    )
+    alert_on_task_failed: bool = Field(
+        default=True,
+        description="Enable task-failed alerts",
+    )
+    alert_on_worker_offline: bool = Field(
+        default=True,
+        description="Enable worker-offline alerts",
+    )
+    alert_slow_task_seconds: float | None = Field(
+        default=None,
+        description="Alert when a succeeded task exceeds this runtime (disabled if None)",
+    )
+    alert_worker_check_seconds: int = Field(
+        default=30,
+        description="Interval for the periodic stale-worker check",
+    )
 
     model_config = {"env_prefix": "", "case_sensitive": False}
 

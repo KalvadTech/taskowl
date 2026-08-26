@@ -457,7 +457,6 @@ dev = [
 
 ## Future Enhancements (Post-MVP)
 
-- **Alerts / webhook notifications**: event-driven notifications on task failure, worker offline, and slow tasks; delivered via generic webhook (Slack/Discord); configured via env
 - **Workflow automation**: full trigger → conditions → actions engine with retry orchestration, circuit breakers, and Slack integration (superset of alerts)
 - **Prometheus metrics**: `/metrics` endpoint exposing task event counters, execution duration histogram, and worker status gauges derived from Celery events
 - **Task progress tracking**: support custom `task-steps` / `task-progress` events; optional helper for emitting progress from tasks; surface progress in task detail
@@ -472,6 +471,7 @@ dev = [
 - **Redis Broker Support** ✅: taskowl works with Redis as the Celery broker via `CELERY_BROKER_URL`; test data generator is transport-aware (topic for AMQP, fanout for Redis). Multi-broker support complete (RabbitMQ + Redis)
 - **Orphan Detection (V1)** ✅: query-time detection of tasks stuck in STARTED whose worker went offline; `GET /api/tasks/orphaned` endpoint, `list_orphaned_tasks` MCP tool, `orphaned` flag in task detail, and orphaned-task retry. Configurable via `ORPHAN_GRACE_SECONDS` and `WORKER_OFFLINE_TIMEOUT_SECONDS`. Background scanner deferred to alerting work
 - **Worker Offline Detection** ✅: `GET /api/workers` (and MCP `get_worker_status`) now derive worker status as `online`/`offline`/`unknown` based on `WORKER_OFFLINE_TIMEOUT_SECONDS`; raw last event exposed as `last_event` (append-only, no UPDATE)
+- **Alerts / Webhooks (v1)** ✅: Slack-compatible webhook alerts for task failures, worker offline (event + periodic stale-heartbeat check), and slow tasks; metadata-only payloads; configured via `ALERT_WEBHOOK_URL`, `ALERT_ON_TASK_FAILED`, `ALERT_ON_WORKER_OFFLINE`, `ALERT_SLOW_TASK_SECONDS`, `ALERT_WORKER_CHECK_SECONDS`
 
 ## License
 

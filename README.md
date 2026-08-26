@@ -341,6 +341,11 @@ All configuration is via environment variables:
 | `API_KEY` | API key for authentication (optional) | None (disabled) | No |
 | `ORPHAN_GRACE_SECONDS` | Wait after task started before flagging as orphan | `60` | No |
 | `WORKER_OFFLINE_TIMEOUT_SECONDS` | No heartbeat for this long means worker is offline | `30` | No |
+| `ALERT_WEBHOOK_URL` | Slack webhook URL to post alerts to (disabled if unset) | None | No |
+| `ALERT_ON_TASK_FAILED` | Enable task-failed alerts | `true` | No |
+| `ALERT_ON_WORKER_OFFLINE` | Enable worker-offline alerts | `true` | No |
+| `ALERT_SLOW_TASK_SECONDS` | Alert when a succeeded task exceeds this runtime | None (disabled) | No |
+| `ALERT_WORKER_CHECK_SECONDS` | Interval for the periodic stale-worker check | `30` | No |
 
 ### Brokers
 
@@ -358,6 +363,34 @@ The consumer, worker management, and task actions all use Celery's broker
 abstraction, so no code changes are needed when switching brokers. The test
 data generator (`scripts/generate_test_data.py`) automatically uses the right
 exchange type for the broker (topic for AMQP, fanout for Redis).
+
+### Alerts / Webhooks
+
+taskowl can send Slack-compatible webhook notifications when tasks fail,
+workers go offline, or tasks run longer than a threshold. Alerting is **off by
+default** — set `ALERT_WEBHOOK_URL` to enable it.
+
+**Example: create a Slack incoming webhook**
+1. Go to [Slack API: Incoming Webhooks](https://api.slack.com/messaging/webhooks)
+2. Create a webhook for your workspace and channel
+3. Copy the webhook URL
+
+**Configure taskowl**
+```bash
+export ALERT_WEBHOOK_URL="https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+```
+
+**Available conditions:**
+- `ALERT_ON_TASK_FAILED=true` (default) — alert when a task fails
+- `ALERT_ON_WORKER_OFFLINE=true` (default) — alert when a worker goes offline
+  (either an explicit `worker-offline` event or a stale heartbeat detected by
+  the periodic check every `ALERT_WORKER_CHECK_SECONDS`)
+- `ALERT_SLOW_TASK_SECONDS=30` — alert when a succeeded task exceeds 30s
+  (unset/None disables)
+
+Alerts are sent as Slack-formatted payloads (with attachments/fields) containing
+task metadata only — task name, task ID, worker, error message, runtime. Args,
+kwargs, and results are never sent to the webhook.
 
 ## Authentication
 
