@@ -459,7 +459,6 @@ dev = [
 
 - **Workflow automation**: full trigger → conditions → actions engine with retry orchestration, circuit breakers, and Slack integration (superset of alerts)
 - **Prometheus metrics**: `/metrics` endpoint exposing task event counters, execution duration histogram, and worker status gauges derived from Celery events
-- **Task progress tracking**: support custom `task-steps` / `task-progress` events; optional helper for emitting progress from tasks; surface progress in task detail
 - **Retry chain visualization**: surface parent/child relationships (root_id/parent_id) in get_task, showing original → retry_1 → retry_2 chain
 - **Task result storage**: optional result backend integration
 
