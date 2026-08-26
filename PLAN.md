@@ -458,7 +458,6 @@ dev = [
 ## Future Enhancements (Post-MVP)
 
 - **Workflow automation**: full trigger → conditions → actions engine with retry orchestration, circuit breakers, and Slack integration (superset of alerts)
-- **Retry chain visualization**: surface parent/child relationships (root_id/parent_id) in get_task, showing original → retry_1 → retry_2 chain
 - **Task result storage**: optional result backend integration
 
 ## Completed Enhancements
@@ -471,6 +470,7 @@ dev = [
 - **Worker Offline Detection** ✅: `GET /api/workers` (and MCP `get_worker_status`) now derive worker status as `online`/`offline`/`unknown` based on `WORKER_OFFLINE_TIMEOUT_SECONDS`; raw last event exposed as `last_event` (append-only, no UPDATE)
 - **Alerts / Webhooks (v1)** ✅: Slack-compatible webhook alerts for task failures, worker offline (event + periodic stale-heartbeat check), and slow tasks; metadata-only payloads; configured via `ALERT_WEBHOOK_URL`, `ALERT_ON_TASK_FAILED`, `ALERT_ON_WORKER_OFFLINE`, `ALERT_SLOW_TASK_SECONDS`, `ALERT_WORKER_CHECK_SECONDS`
 - **Prometheus Metrics** ✅: `/metrics` endpoint on the API server exposing `taskowl_task_events_total`, `taskowl_task_execution_duration_seconds`, `taskowl_worker_status`, `taskowl_worker_active_tasks`, `taskowl_worker_processed_total`; computed on-scrape from event tables using `prometheus-client`; intentionally unauthenticated (network-level protection advised)
+- **Retry Chain Visualization** ✅: `get_task` surfaces `root_id`/`parent_id`; `GET /api/tasks/{task_id}/chain` + MCP `get_task_chain` return the full retry family ordered chronologically; `retry_task` preserves chain linkage via `root_id`/`parent_id`; automatic Celery retries work out of the box
 
 ## License
 

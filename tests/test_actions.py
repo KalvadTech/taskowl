@@ -133,6 +133,7 @@ async def test_retry_task_success(db_session: AsyncSession):
             args={"arg1": "value1"},
             kwargs={"kwarg1": "value2"},
             queue="default",
+            root_id=task_id,
         )
     )
     db_session.add(
@@ -164,6 +165,8 @@ async def test_retry_task_success(db_session: AsyncSession):
             args={"arg1": "value1"},
             kwargs={"kwarg1": "value2"},
             queue="default",
+            root_id=task_id,
+            parent_id=task_id,
         )
 
 

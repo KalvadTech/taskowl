@@ -15,6 +15,7 @@ from taskowl.config import settings
 from taskowl.database import close_db, get_db, init_db
 from taskowl.metrics import generate_metrics
 from taskowl.queries import (
+    get_task_chain_query,
     get_task_query,
     get_task_summary_query,
     get_task_timeline_query,
@@ -162,6 +163,19 @@ async def api_get_task_timeline(
     result = await get_task_timeline_query(task_id, session)
     if result and "error" in result[0]:
         raise HTTPException(status_code=404, detail=result[0]["error"])
+    return result
+
+
+@app.get("/api/tasks/{task_id}/chain")
+async def api_get_task_chain(
+    task_id: str,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Get the full retry chain for a task."""
+    result = await get_task_chain_query(task_id, session)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
     return result
 
 

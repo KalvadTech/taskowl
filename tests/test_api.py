@@ -815,3 +815,68 @@ async def test_api_get_task_reports_orphaned(client: AsyncClient, db_session: As
     assert response.status_code == 200
     data = response.json()
     assert data["orphaned"] is True
+
+
+@pytest.mark.asyncio
+async def test_api_get_task_chain(client: AsyncClient, db_session: AsyncSession):
+    """Test GET /api/tasks/{task_id}/chain."""
+    root_id = uuid.uuid4()
+    retry_1 = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    for tid, parent in [(root_id, None), (retry_1, root_id)]:
+        db_session.add(
+            TaskEvent(
+                event_type="started",
+                task_id=tid,
+                timestamp=now,
+                hostname="worker1@localhost",
+                root_id=root_id,
+                parent_id=parent,
+            )
+        )
+    await db_session.commit()
+
+    response = await client.get(f"/api/tasks/{root_id}/chain")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["root_id"] == str(root_id)
+    assert len(data["chain"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_api_get_task_chain_not_found(client: AsyncClient):
+    """Test GET /api/tasks/{task_id}/chain with invalid UUID."""
+    response = await client.get("/api/tasks/invalid-uuid/chain")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_get_task_includes_chain_fields(client: AsyncClient, db_session: AsyncSession):
+    """Test get_task includes root_id and parent_id."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="test_task",
+            root_id=task_id,
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="succeeded",
+            task_id=task_id,
+            timestamp=now + timedelta(seconds=1),
+            hostname="worker1@localhost",
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get(f"/api/tasks/{task_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["root_id"] == str(task_id)

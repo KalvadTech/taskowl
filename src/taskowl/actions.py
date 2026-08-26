@@ -52,6 +52,8 @@ async def _get_task_info(session: AsyncSession, task_uuid: uuid.UUID) -> dict | 
         "args": None,
         "kwargs": None,
         "queue": None,
+        "root_id": None,
+        "parent_id": None,
     }
 
     for event in events:
@@ -63,6 +65,10 @@ async def _get_task_info(session: AsyncSession, task_uuid: uuid.UUID) -> dict | 
             task_info["kwargs"] = event.kwargs
         if event.queue:
             task_info["queue"] = event.queue
+        if event.root_id:
+            task_info["root_id"] = event.root_id
+        if event.parent_id:
+            task_info["parent_id"] = event.parent_id
 
     # Detect orphaned state (stuck in STARTED with worker offline)
     if await _task_is_orphaned(session, events[-1], datetime.now(UTC)):
@@ -189,14 +195,17 @@ async def retry_task(
     if not task_info["name"]:
         return {"error": "Cannot retry task: task name not found in events"}
 
-    # Send new task to Celery
+    # Send new task to Celery, preserving the retry chain linkage
     try:
         app = _get_celery_app()
+        new_root = task_info["root_id"] or task_uuid
         result = app.send_task(
             task_info["name"],
             args=task_info.get("args"),
             kwargs=task_info.get("kwargs"),
             queue=task_info.get("queue"),
+            root_id=new_root,
+            parent_id=task_uuid,
         )
         return {
             "status": "success",

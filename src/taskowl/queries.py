@@ -140,6 +140,8 @@ async def _get_task_impl(session: AsyncSession, task_uuid: uuid.UUID, task_id: s
     # Reconstruct task state from events
     task_state: dict = {
         "id": str(task_uuid),
+        "root_id": None,
+        "parent_id": None,
         "events": [],
     }
 
@@ -167,6 +169,10 @@ async def _get_task_impl(session: AsyncSession, task_uuid: uuid.UUID, task_id: s
             task_state["runtime"] = event.runtime
         if event.queue:
             task_state["queue"] = event.queue
+        if event.root_id:
+            task_state["root_id"] = str(event.root_id)
+        if event.parent_id:
+            task_state["parent_id"] = str(event.parent_id)
 
         task_state["events"].append(event_data)
 
@@ -539,3 +545,96 @@ async def _list_orphaned_tasks_impl(session: AsyncSession, limit: int) -> list[d
             )
 
     return orphaned_tasks[:limit]
+
+
+async def get_task_chain_query(task_id: str, session: AsyncSession | None = None) -> dict:
+    """Get the full retry chain for a task, ordered chronologically.
+
+    The chain includes every task that shares the root task id (the original
+    task and all of its retries). Each node exposes its current state plus
+    parent linkage so branching (if any) remains visible.
+
+    Args:
+        task_id: UUID of the task
+        session: Optional database session (for testing)
+
+    Returns:
+        Dict with root_id and an ordered chain list
+    """
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError:
+        return {"error": f"Invalid task_id format: {task_id}"}
+
+    if session is None:
+        async with async_session_maker() as session:
+            return await _get_task_chain_impl(session, task_uuid, task_id)
+    return await _get_task_chain_impl(session, task_uuid, task_id)
+
+
+async def _get_task_chain_impl(session: AsyncSession, task_uuid: uuid.UUID, task_id: str) -> dict:
+    """Internal implementation of get_task_chain_query."""
+    # Resolve the root id for this task
+    root_query = (
+        select(TaskEvent.root_id)
+        .where(TaskEvent.task_id == task_uuid, TaskEvent.root_id.isnot(None))
+        .order_by(TaskEvent.timestamp.desc())
+        .limit(1)
+    )
+    root_result = await session.execute(root_query)
+    root_id = root_result.scalar_one_or_none()
+
+    if root_id is None:
+        # No root recorded; the task is its own chain (or we can't find it)
+        root_id = task_uuid
+
+    # Find all tasks in the retry family sharing this root,
+    # always including the queried task itself (even if it has no root_id)
+    family = (
+        select(
+            TaskEvent.task_id,
+            func.min(TaskEvent.timestamp).label("first_ts"),
+        )
+        .where((TaskEvent.root_id == root_id) | (TaskEvent.task_id == task_uuid))
+        .group_by(TaskEvent.task_id)
+        .subquery()
+    )
+
+    # Get the latest event per task in the family
+    max_timestamps = (
+        select(
+            TaskEvent.task_id,
+            func.max(TaskEvent.timestamp).label("max_ts"),
+        )
+        .where(TaskEvent.task_id.in_(select(family.c.task_id)))
+        .group_by(TaskEvent.task_id)
+        .subquery()
+    )
+    latest_events_query = select(TaskEvent).join(
+        max_timestamps,
+        (TaskEvent.task_id == max_timestamps.c.task_id)
+        & (TaskEvent.timestamp == max_timestamps.c.max_ts),
+    )
+    result = await session.execute(latest_events_query)
+    latest_events = result.scalars().all()
+
+    # Build the chain nodes
+    chain_map: dict[uuid.UUID, dict] = {}
+    for event in latest_events:
+        chain_map[event.task_id] = {
+            "task_id": str(event.task_id),
+            "parent_id": str(event.parent_id) if event.parent_id else None,
+            "state": event.event_type,
+            "started_at": event.timestamp.isoformat(),
+            "runtime": event.runtime,
+        }
+
+    # Order by the first event timestamp in the family
+    result = await session.execute(
+        select(family.c.task_id, family.c.first_ts).order_by(family.c.first_ts)
+    )
+    ordered_ids = [row[0] for row in result.all()]
+
+    chain = [chain_map[tid] for tid in ordered_ids if tid in chain_map]
+
+    return {"root_id": str(root_id), "chain": chain}

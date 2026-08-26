@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from taskowl.models import TaskEvent, WorkerEvent
 from taskowl.queries import (
+    get_task_chain_query,
     get_task_query,
     get_task_summary_query,
     get_task_timeline_query,
@@ -587,3 +588,69 @@ async def test_worker_status_mixed(db_session: AsyncSession):
     assert statuses["worker-online@localhost"] == "online"
     assert statuses["worker-stale@localhost"] == "offline"
     assert statuses["worker-offline@localhost"] == "offline"
+
+
+@pytest.mark.asyncio
+async def test_task_chain_multiple_retries(db_session: AsyncSession):
+    """Chain query should return the whole retry family ordered by time."""
+    root_id = uuid.uuid4()
+    retry_1 = uuid.uuid4()
+    retry_2 = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    for tid, parent, ts_off in [
+        (root_id, None, 0),
+        (retry_1, root_id, 10),
+        (retry_2, retry_1, 20),
+    ]:
+        db_session.add(
+            TaskEvent(
+                event_type="started",
+                task_id=tid,
+                timestamp=now + timedelta(seconds=ts_off),
+                hostname="worker1@localhost",
+                root_id=root_id,
+                parent_id=parent,
+            )
+        )
+    await db_session.commit()
+
+    result = await get_task_chain_query(str(retry_2), session=db_session)
+
+    assert result["root_id"] == str(root_id)
+    chain = result["chain"]
+    assert len(chain) == 3
+    # Ordered chronologically: original first, retry_2 last
+    assert [node["task_id"] for node in chain] == [str(root_id), str(retry_1), str(retry_2)]
+    assert chain[0]["parent_id"] is None
+    assert chain[1]["parent_id"] == str(root_id)
+    assert chain[2]["parent_id"] == str(retry_1)
+
+
+@pytest.mark.asyncio
+async def test_task_chain_single_task(db_session: AsyncSession):
+    """A task with no retries should produce a chain of one."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    db_session.add(
+        TaskEvent(
+            event_type="succeeded",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+        )
+    )
+    await db_session.commit()
+
+    result = await get_task_chain_query(str(task_id), session=db_session)
+
+    assert result["root_id"] == str(task_id)
+    assert len(result["chain"]) == 1
+    assert result["chain"][0]["task_id"] == str(task_id)
+
+
+@pytest.mark.asyncio
+async def test_task_chain_invalid_uuid(db_session: AsyncSession):
+    """Invalid UUID should return an error."""
+    result = await get_task_chain_query("not-a-uuid", session=db_session)
+    assert "error" in result

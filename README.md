@@ -112,6 +112,28 @@ Get a chronological timeline of all events for a specific task.
 curl "http://localhost:8000/api/tasks/abc-123-def/timeline"
 ```
 
+#### GET /api/tasks/{task_id}/chain
+
+Get the full retry chain for a task (the original task plus all of its retries), ordered chronologically.
+
+**Example:**
+```bash
+curl "http://localhost:8000/api/tasks/abc-123-def/chain"
+```
+
+**Response:**
+```json
+{
+  "root_id": "abc-123-def",
+  "chain": [
+    {"task_id": "abc-123-def", "parent_id": null, "state": "failed", "started_at": "2026-08-24T10:00:00Z", "runtime": null},
+    {"task_id": "def-456-ghi", "parent_id": "abc-123-def", "state": "succeeded", "started_at": "2026-08-24T10:01:00Z", "runtime": 1.2}
+  ]
+}
+```
+
+Retries initiated through taskowl (`POST /api/tasks/{task_id}/retry`) preserve the chain via `root_id`/`parent_id`, as do Celery's own automatic retries.
+
 #### GET /api/tasks/summary
 
 Get aggregate task statistics.
@@ -499,6 +521,7 @@ When authentication is enabled, the following endpoints require a valid API key:
 - `GET /api/tasks`
 - `GET /api/tasks/{task_id}`
 - `GET /api/tasks/{task_id}/timeline`
+- `GET /api/tasks/{task_id}/chain`
 - `GET /api/tasks/summary`
 - `GET /api/workers`
 - `GET /api/workers/list`
@@ -579,6 +602,20 @@ Show me the timeline for task abc-123-def
 ```
 
 **Calls:** `GET /api/tasks/{task_id}/timeline`
+
+### get_task_chain
+
+Get the full retry chain for a task (original task and all retries).
+
+**Parameters:**
+- `task_id`: UUID of the task
+
+**Example:**
+```
+Show me the retry chain for task abc-123-def
+```
+
+**Calls:** `GET /api/tasks/{task_id}/chain`
 
 ### get_task_summary
 

@@ -118,6 +118,24 @@ def register_tools(server: MCPServer) -> None:
             return response.json()
 
     @server.tool(
+        name="get_task_chain",
+        description="Get the full retry chain for a task (original and all retries)",
+    )
+    async def get_task_chain(task_id: str) -> dict:
+        """Get the full retry chain for a task.
+
+        Args:
+            task_id: UUID of the task
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks/{task_id}/chain",
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
         name="get_task_summary",
         description="Get aggregate task statistics",
     )
