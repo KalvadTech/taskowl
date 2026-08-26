@@ -6,11 +6,15 @@ Modern Celery task monitoring with MCP integration. No UI, just data.
 
 ## Features
 
-- **MCP-first**: Query tasks, workers, and queues via Model Context Protocol
-- **Event sourcing**: Append-only event log for complete audit trail and timeline reconstruction
+- **MCP-first**: Query and manage tasks, workers, and queues via the Model Context Protocol
+- **Event sourcing**: Append-only event log for a complete audit trail and state reconstruction
 - **Real-time monitoring**: Capture Celery events as they happen
-- **PostgreSQL backend**: Production-ready, no SQLite fallback complexity
-- **Modern stack**: Python 3.14, FastAPI, async everything
+- **Task actions**: Revoke, retry, and recover orphaned tasks
+- **Worker management**: List, inspect, scale, and shut down workers
+- **Alerts**: Slack-compatible webhook notifications on failures, slow tasks, and offline workers
+- **Prometheus metrics**: Scrape task and worker telemetry via `/metrics`
+- **PostgreSQL backend**: Production-ready, async throughout
+- **Broker-agnostic**: RabbitMQ, LavinMQ, Redis, or any Celery/kombu broker
 
 ## Quick Start
 
@@ -18,44 +22,74 @@ Modern Celery task monitoring with MCP integration. No UI, just data.
 
 - Python 3.14+
 - PostgreSQL 14+
-- A Celery broker: RabbitMQ (or LavinMQ), Redis, etc.
-- [uv](https://github.com/astral-sh/uv) package manager
+- A Celery broker (RabbitMQ, LavinMQ, Redis, ...)
+- [uv](https://github.com/astral-sh/uv)
 
 ### Installation
 
 ```bash
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Clone and install
 git clone https://github.com/KalvadTech/taskowl.git
 cd taskowl
 make install
 
-# Set environment variables
 export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/taskowl"
 export CELERY_BROKER_URL="amqp://guest:guest@localhost:5672//"
 
-# Run database migrations
 make migrate
-
-# Start the API server
-make api
-
-# In another terminal, start the event consumer
-make consume
-
-# In another terminal, start the MCP server
-make mcp
 ```
 
-### MCP Usage
+Run the three processes (separate terminals):
 
-The MCP server runs on port 8001 by default. Configure your MCP client:
+```bash
+make api       # REST API on :8000
+make consume   # Celery event consumer
+make mcp       # MCP server on :8001
+```
+
+## Configuring your Celery app
+
+taskowl listens to Celery's **events** stream, which workers emit only if
+enabled. Add this to your Celery application so taskowl can see your tasks and
+workers:
+
+```python
+# celery_app.py
+from celery import Celery
+
+app = Celery("myapp", broker="amqp://guest:guest@localhost:5672//")
+
+# Workers emit task/worker events (sent, received, started, succeeded, failed, ...)
+app.conf.worker_send_task_events = True
+
+# Emit a 'task-sent' event when a task is published
+app.conf.task_send_sent_event = True
+
+# How often workers send a heartbeat (default: 2s). Higher values
+# increase the worker-offline detection delay.
+app.conf.worker_heartbeat_interval = 2
+```
+
+Alternatively, start your worker with the `-E` flag, which is equivalent to
+`worker_send_task_events = True`:
+
+```bash
+celery -A myapp worker -E --loglevel=info
+```
+
+> **Note**: If events are not enabled, taskowl simply sees nothing — no tasks,
+> no workers. Enabling events is the one integration required.
+
+## Connecting MCP clients
+
+The MCP server runs on `http://localhost:8001/mcp` (Streamable HTTP).
+
+### opencode
+
+Add a remote MCP server to your `opencode.json`:
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "taskowl": {
       "type": "remote",
       "url": "http://localhost:8001/mcp",
@@ -66,286 +100,52 @@ The MCP server runs on port 8001 by default. Configure your MCP client:
 }
 ```
 
-Then ask your LLM:
-- "Show me the last 10 failed tasks"
-- "What's the average task runtime in the last hour?"
-- "Which workers are currently online?"
-- "Show me the timeline for task abc-123-def"
+### Other MCP clients
 
-### REST API
+Point your MCP client at the Streamable HTTP endpoint `http://localhost:8001/mcp`.
+If authentication is enabled (see below), send the taskowl API key as
+`Authorization: Bearer <key>` with each request.
 
-The API server (started with `make api`) exposes REST endpoints that the MCP server uses internally. You can also call these endpoints directly:
+## Available tools
 
-**Base URL:** `http://localhost:8000`
+| Category | Tools |
+|---|---|
+| **Tasks** | `list_tasks`, `get_task`, `get_task_timeline`, `get_task_chain`, `get_task_summary`, `list_orphaned_tasks` |
+| **Task actions** | `revoke_task`, `retry_task` |
+| **Workers** | `get_worker_status`, `list_workers`, `get_worker_stats`, `shutdown_worker`, `scale_worker_pool`, `get_active_tasks` |
 
-#### GET /api/tasks
+**Total: 14 tools**
 
-List tasks with optional filters.
+## Examples
 
-**Query Parameters:**
-- `state` (optional): Filter by state (received, started, succeeded, failed, retried, revoked)
-- `name` (optional): Filter by task name
-- `worker` (optional): Filter by worker hostname
-- `since` (optional): Only tasks created after this datetime (ISO 8601)
-- `limit` (optional): Max number of tasks to return (default: 100)
+Questions you can ask your AI assistant when the MCP server is connected:
 
-**Example:**
-```bash
-curl "http://localhost:8000/api/tasks?state=failed&limit=10"
+| Question | Tools used |
+|---|---|
+| "Show me failed tasks from the last hour" | `list_tasks` |
+| "Which tasks are orphaned?" | `list_orphaned_tasks` |
+| "Show me the timeline for task abc" | `get_task_timeline` |
+| "What's the retry chain for task abc?" | `get_task_chain` |
+| "What's the task success rate in the last 30 minutes?" | `get_task_summary` |
+| "Which workers are online?" | `get_worker_status`, `list_workers` |
+| "Shutdown worker celery@worker1" | `shutdown_worker` |
+| "Retry task abc" | `retry_task` |
+
+## Architecture
+
+```
+Celery workers ──events──▶ Broker ──▶ taskowl consumer ──▶ PostgreSQL
+                                                              │
+                         REST API ◀───────────────────────────┘
+                              ▲
+                              │ HTTP
+                         MCP server ──▶ LLM / MCP client
 ```
 
-#### GET /api/tasks/{task_id}
-
-Get detailed information about a specific task.
-
-**Example:**
-```bash
-curl "http://localhost:8000/api/tasks/abc-123-def"
-```
-
-#### GET /api/tasks/{task_id}/timeline
-
-Get a chronological timeline of all events for a specific task.
-
-**Example:**
-```bash
-curl "http://localhost:8000/api/tasks/abc-123-def/timeline"
-```
-
-#### GET /api/tasks/{task_id}/chain
-
-Get the full retry chain for a task (the original task plus all of its retries), ordered chronologically.
-
-**Example:**
-```bash
-curl "http://localhost:8000/api/tasks/abc-123-def/chain"
-```
-
-**Response:**
-```json
-{
-  "root_id": "abc-123-def",
-  "chain": [
-    {"task_id": "abc-123-def", "parent_id": null, "state": "failed", "started_at": "2026-08-24T10:00:00Z", "runtime": null},
-    {"task_id": "def-456-ghi", "parent_id": "abc-123-def", "state": "succeeded", "started_at": "2026-08-24T10:01:00Z", "runtime": 1.2}
-  ]
-}
-```
-
-Retries initiated through taskowl (`POST /api/tasks/{task_id}/retry`) preserve the chain via `root_id`/`parent_id`, as do Celery's own automatic retries.
-
-#### GET /api/tasks/summary
-
-Get aggregate task statistics.
-
-**Query Parameters:**
-- `hours` (optional): Time window in hours (default: 1)
-
-**Example:**
-```bash
-curl "http://localhost:8000/api/tasks/summary?hours=24"
-```
-
-#### GET /api/tasks/orphaned
-
-List tasks currently considered orphaned (stuck in `STARTED` state whose worker went offline).
-
-**Query Parameters:**
-- `limit` (optional): Max number of tasks to return (default: 100)
-
-**Example:**
-```bash
-curl "http://localhost:8000/api/tasks/orphaned"
-```
-
-**Response:**
-```json
-[
-  {
-    "id": "abc-123-def",
-    "name": "myapp.tasks.process_data",
-    "state": "orphaned",
-    "worker": "celery@worker1",
-    "queue": "default",
-    "started_at": "2026-08-24T14:03:00Z"
-  }
-]
-```
-
-**Note:** A task is orphaned when it is in `STARTED` state, its `started` timestamp is older than `ORPHAN_GRACE_SECONDS`, and its worker has been offline for longer than `WORKER_OFFLINE_TIMEOUT_SECONDS`.
-
-#### GET /api/workers
-
-Get status of all Celery workers. The `status` field is derived from worker events: `online` if a heartbeat was received within `WORKER_OFFLINE_TIMEOUT_SECONDS`, `offline` if the worker sent an offline event or its last heartbeat is stale, and `unknown` if no worker events exist. `last_event` contains the raw last event type.
-
-**Example:**
-```bash
-curl "http://localhost:8000/api/workers"
-```
-
-#### GET /api/workers/list
-
-List all active Celery workers.
-
-**Example:**
-```bash
-curl "http://localhost:8000/api/workers/list"
-```
-
-**Response:**
-```json
-{
-  "workers": [
-    {
-      "name": "celery@worker1",
-      "status": "online"
-    }
-  ]
-}
-```
-
-#### GET /api/workers/{worker_name}/stats
-
-Get detailed statistics for a specific worker.
-
-**Example:**
-```bash
-curl "http://localhost:8000/api/workers/celery@worker1/stats"
-```
-
-**Response:**
-```json
-{
-  "stats": {
-    "pool": {
-      "max-concurrency": 4,
-      "processes": [4321, 4322, 4323, 4324]
-    },
-    "uptime": 3600,
-    "pid": 1234
-  }
-}
-```
-
-#### POST /api/workers/{worker_name}/shutdown
-
-Gracefully shutdown a worker.
-
-**Example:**
-```bash
-curl -X POST "http://localhost:8000/api/workers/celery@worker1/shutdown"
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "message": "Shutdown command sent to celery@worker1"
-}
-```
-
-#### POST /api/workers/{worker_name}/scale
-
-Scale worker pool up or down.
-
-**Query Parameters:**
-- `delta`: Number of processes to add (positive) or remove (negative)
-
-**Example:**
-```bash
-# Grow pool by 2
-curl -X POST "http://localhost:8000/api/workers/celery@worker1/scale?delta=2"
-
-# Shrink pool by 1
-curl -X POST "http://localhost:8000/api/workers/celery@worker1/scale?delta=-1"
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "message": "Worker pool grown by 2",
-  "worker": "celery@worker1",
-  "delta": 2
-}
-```
-
-#### GET /api/workers/active-tasks
-
-Get currently executing tasks.
-
-**Query Parameters:**
-- `worker_name` (optional): Filter by specific worker
-
-**Example:**
-```bash
-# All active tasks
-curl "http://localhost:8000/api/workers/active-tasks"
-
-# Active tasks for specific worker
-curl "http://localhost:8000/api/workers/active-tasks?worker_name=celery@worker1"
-```
-
-**Response:**
-```json
-{
-  "active_tasks": {
-    "celery@worker1": [
-      {
-        "id": "abc-123-def",
-        "name": "myapp.tasks.process_data",
-        "args": ["user@example.com"],
-        "kwargs": {}
-      }
-    ]
-  }
-}
-```
-
-#### POST /api/tasks/{task_id}/revoke
-
-Revoke (cancel) a task. Optionally terminate it if it's currently running.
-
-**Query Parameters:**
-- `terminate` (optional): If `true`, terminate the task if it's currently running (default: `false`)
-
-**Example:**
-```bash
-# Revoke a pending task
-curl -X POST "http://localhost:8000/api/tasks/abc-123-def/revoke"
-
-# Revoke and terminate a running task
-curl -X POST "http://localhost:8000/api/tasks/abc-123-def/revoke?terminate=true"
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "message": "Task abc-123-def has been revoked",
-  "terminated": false
-}
-```
-
-#### POST /api/tasks/{task_id}/retry
-
-Retry a failed or revoked task by creating a new task with the same parameters.
-
-**Example:**
-```bash
-curl -X POST "http://localhost:8000/api/tasks/abc-123-def/retry"
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "message": "Task abc-123-def has been retried",
-  "new_task_id": "def-456-ghi"
-}
-```
-
-**Note:** Only tasks in `failed`, `revoked`, or `orphaned` state can be retried. Attempting to retry a task in any other state will return an error.
+- **Consumer** (separate process) captures Celery events and appends them to
+  PostgreSQL (`task_events`, `worker_events`).
+- **REST API** serves queries and actions over the event-sourcing tables.
+- **MCP server** is a thin wrapper that calls the REST API for LLM access.
 
 ## Configuration
 
@@ -366,65 +166,46 @@ All configuration is via environment variables:
 | `ALERT_WEBHOOK_URL` | Slack webhook URL to post alerts to (disabled if unset) | None | No |
 | `ALERT_ON_TASK_FAILED` | Enable task-failed alerts | `true` | No |
 | `ALERT_ON_WORKER_OFFLINE` | Enable worker-offline alerts | `true` | No |
-| `ALERT_SLOW_TASK_SECONDS` | Alert when a succeeded task exceeds this runtime | None (disabled) | No |
+| `ALERT_SLOW_TASK_SECONDS` | Alert when a succeeded task exceeds this runtime | None | No |
 | `ALERT_WORKER_CHECK_SECONDS` | Interval for the periodic stale-worker check | `30` | No |
 
 ### Brokers
 
-taskowl supports any Celery/kombu broker via `CELERY_BROKER_URL`. Examples:
+taskowl works with any Celery/kombu broker via `CELERY_BROKER_URL`:
 
 ```bash
-# RabbitMQ / LavinMQ
-export CELERY_BROKER_URL="amqp://guest:guest@localhost:5672//"
-
-# Redis
-export CELERY_BROKER_URL="redis://localhost:6379/0"
+export CELERY_BROKER_URL="amqp://guest:guest@localhost:5672//"   # RabbitMQ / LavinMQ
+export CELERY_BROKER_URL="redis://localhost:6379/0"              # Redis
 ```
-
-The consumer, worker management, and task actions all use Celery's broker
-abstraction, so no code changes are needed when switching brokers. The test
-data generator (`scripts/generate_test_data.py`) automatically uses the right
-exchange type for the broker (topic for AMQP, fanout for Redis).
 
 ### Alerts / Webhooks
 
-taskowl can send Slack-compatible webhook notifications when tasks fail,
-workers go offline, or tasks run longer than a threshold. Alerting is **off by
-default** — set `ALERT_WEBHOOK_URL` to enable it.
+Set `ALERT_WEBHOOK_URL` to a Slack incoming webhook to receive notifications on
+task failures, offline workers, and slow tasks. Alerting is **off by default**.
 
-**Example: create a Slack incoming webhook**
-1. Go to [Slack API: Incoming Webhooks](https://api.slack.com/messaging/webhooks)
-2. Create a webhook for your workspace and channel
-3. Copy the webhook URL
-
-**Configure taskowl**
 ```bash
 export ALERT_WEBHOOK_URL="https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
 ```
 
-**Available conditions:**
-- `ALERT_ON_TASK_FAILED=true` (default) — alert when a task fails
-- `ALERT_ON_WORKER_OFFLINE=true` (default) — alert when a worker goes offline
-  (either an explicit `worker-offline` event or a stale heartbeat detected by
-  the periodic check every `ALERT_WORKER_CHECK_SECONDS`)
-- `ALERT_SLOW_TASK_SECONDS=30` — alert when a succeeded task exceeds 30s
-  (unset/None disables)
+Conditions:
 
-Alerts are sent as Slack-formatted payloads (with attachments/fields) containing
-task metadata only — task name, task ID, worker, error message, runtime. Args,
-kwargs, and results are never sent to the webhook.
+- `ALERT_ON_TASK_FAILED=true` (default) — notify when a task fails
+- `ALERT_ON_WORKER_OFFLINE=true` (default) — notify when a worker goes offline
+  (via an `worker-offline` event or a stale heartbeat detected every
+  `ALERT_WORKER_CHECK_SECONDS`)
+- `ALERT_SLOW_TASK_SECONDS=30` — notify when a succeeded task exceeds 30s
+
+Payloads are Slack-formatted and contain task metadata only (name, task ID,
+worker, error, runtime) — args, kwargs, and results are never sent.
 
 ### Prometheus Metrics
 
-taskowl exposes a Prometheus `/metrics` endpoint on the API server for scraping
-task and worker telemetry. Metrics are computed on-scrape from the append-only
-event tables, so they always reflect current database contents.
+Scrape task and worker telemetry from the API server:
 
 ```bash
 curl http://localhost:8000/metrics
 ```
 
-**Example Prometheus scrape config:**
 ```yaml
 scrape_configs:
   - job_name: taskowl
@@ -434,8 +215,6 @@ scrape_configs:
       - targets: ["localhost:8000"]
 ```
 
-**Exposed metrics:**
-
 | Metric | Type | Labels |
 |--------|------|--------|
 | `taskowl_task_events_total` | Counter | `event_type`, `task_name`, `worker` |
@@ -444,468 +223,96 @@ scrape_configs:
 | `taskowl_worker_active_tasks` | Gauge | `worker` |
 | `taskowl_worker_processed_total` | Counter | `worker` |
 
-> **Security note:** `/metrics` is intentionally unauthenticated so Prometheus
-> can scrape it without the taskowl API key. Only expose it to trusted networks
-> or behind a reverse proxy.
+> **Security**: `/metrics` is intentionally unauthenticated so Prometheus can
+> scrape it without the taskowl API key. Only expose it to trusted networks or
+> behind a reverse proxy.
 
 ## Authentication
 
-taskowl supports optional API key authentication for both the REST API and MCP server. When `API_KEY` is set, all requests must include a valid Bearer token.
-
-### Enabling Authentication
-
-Set the `API_KEY` environment variable:
+Optional API key authentication protects the REST API and MCP server. Set
+`API_KEY` to enable it; all requests must then include
+`Authorization: Bearer <key>`.
 
 ```bash
 export API_KEY="your-secret-key-here"
-```
-
-### Using Authentication
-
-**REST API:**
-
-Include the API key in the `Authorization` header:
-
-```bash
 curl -H "Authorization: Bearer your-secret-key-here" http://localhost:8000/api/tasks
 ```
 
-**MCP Server:**
-
-Include the API key in the `Authorization` header:
-
-```bash
-curl -X POST http://localhost:8001/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-secret-key-here" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
-```
-
-**OpenCode Configuration:**
-
-Add the `headers` field to your `opencode.json`:
-
-```json
-{
-  "mcp": {
-    "taskowl": {
-      "type": "remote",
-      "url": "http://localhost:8001/mcp",
-      "enabled": true,
-      "oauth": false,
-      "headers": {
-        "Authorization": "Bearer your-secret-key-here"
-      }
-    }
-  }
-}
-```
-
-### Disabling Authentication
-
-To disable authentication, simply don't set `API_KEY` or set it to an empty string:
-
-```bash
-unset API_KEY
-# or
-export API_KEY=""
-```
-
-When authentication is disabled, all endpoints are accessible without an API key.
-
-### Protected Endpoints
-
-When authentication is enabled, the following endpoints require a valid API key:
-
-**REST API:**
-- `GET /api/tasks`
-- `GET /api/tasks/{task_id}`
-- `GET /api/tasks/{task_id}/timeline`
-- `GET /api/tasks/{task_id}/chain`
-- `GET /api/tasks/summary`
-- `GET /api/workers`
-- `GET /api/workers/list`
-- `GET /api/workers/{worker_name}/stats`
-- `POST /api/workers/{worker_name}/shutdown`
-- `POST /api/workers/{worker_name}/scale`
-- `GET /api/workers/active-tasks`
-- `POST /api/tasks/{task_id}/revoke`
-- `POST /api/tasks/{task_id}/retry`
-
-**MCP Server:**
-- All MCP tool calls
-
-The following endpoints remain accessible without authentication:
-- `GET /health` - Health check endpoint
-- `GET /` - Root endpoint (app info)
-
-## MCP Tools
-
-The MCP server (started with `make mcp`) provides tools that internally call the REST API endpoints. These tools are available to LLMs via the Model Context Protocol.
-
-### list_tasks
-
-List tasks with optional filters. State is reconstructed from the latest event for each task.
-
-**Parameters:**
-- `state` (optional): Filter by state (received, started, succeeded, failed, retried, revoked)
-- `name` (optional): Filter by task name
-- `worker` (optional): Filter by worker hostname
-- `since` (optional): Only tasks created after this datetime (ISO 8601)
-- `limit` (optional): Max number of tasks to return (default: 100)
-
-**Example:**
-```
-Show me failed tasks from the last hour
-```
-
-**Calls:** `GET /api/tasks`
-
-### list_orphaned_tasks
-
-List tasks currently considered orphaned (stuck in `STARTED` state whose worker went offline).
-
-**Parameters:**
-- `limit` (optional): Max number of tasks to return (default: 100)
-
-**Example:**
-```
-Which tasks are orphaned?
-```
-
-**Calls:** `GET /api/tasks/orphaned`
-
-### get_task
-
-Get detailed information about a specific task, including all events in chronological order.
-
-**Parameters:**
-- `task_id`: UUID of the task
-
-**Example:**
-```
-Show me details for task abc-123-def
-```
-
-**Calls:** `GET /api/tasks/{task_id}`
-
-### get_task_timeline
-
-Get a chronological timeline of all events for a specific task. Perfect for debugging and understanding task execution flow.
-
-**Parameters:**
-- `task_id`: UUID of the task
-
-**Example:**
-```
-Show me the timeline for task abc-123-def
-```
-
-**Calls:** `GET /api/tasks/{task_id}/timeline`
-
-### get_task_chain
-
-Get the full retry chain for a task (original task and all retries).
-
-**Parameters:**
-- `task_id`: UUID of the task
-
-**Example:**
-```
-Show me the retry chain for task abc-123-def
-```
-
-**Calls:** `GET /api/tasks/{task_id}/chain`
-
-### get_task_summary
-
-Get aggregate task statistics reconstructed from the latest events.
-
-**Parameters:**
-- `hours` (optional): Time window in hours (default: 1)
-
-**Example:**
-```
-What's the task success rate in the last 30 minutes?
-```
-
-**Calls:** `GET /api/tasks/summary`
-
-### get_worker_status
-
-Get status of all Celery workers, derived from the latest events (`online` / `offline` / `unknown` based on `WORKER_OFFLINE_TIMEOUT_SECONDS`).
-
-**Example:**
-```
-Which workers are online?
-```
-
-**Calls:** `GET /api/workers`
-
-### revoke_task
-
-Revoke (cancel) a task. Optionally terminate it if it's currently running.
-
-**Parameters:**
-- `task_id`: UUID of the task to revoke
-- `terminate` (optional): If `true`, terminate the task if it's currently running (default: `false`)
-
-**Example:**
-```
-Cancel task abc-123-def
-```
-
-**Calls:** `POST /api/tasks/{task_id}/revoke`
-
-### retry_task
-
-Retry a failed or revoked task by creating a new task with the same parameters.
-
-**Parameters:**
-- `task_id`: UUID of the task to retry
-
-**Example:**
-```
-Retry task abc-123-def
-```
-
-**Calls:** `POST /api/tasks/{task_id}/retry`
-
-**Note:** Only tasks in `failed` or `revoked` state can be retried.
-
-### list_workers
-
-List all active Celery workers.
-
-**Example:**
-```
-Which workers are currently online?
-```
-
-**Calls:** `GET /api/workers/list`
-
-### get_worker_stats
-
-Get detailed statistics for a specific worker.
-
-**Parameters:**
-- `worker_name`: Name of the worker (e.g., 'celery@worker1')
-
-**Example:**
-```
-Show me stats for worker celery@worker1
-```
-
-**Calls:** `GET /api/workers/{worker_name}/stats`
-
-### shutdown_worker
-
-Gracefully shutdown a Celery worker.
-
-**Parameters:**
-- `worker_name`: Name of the worker to shutdown
-
-**Example:**
-```
-Shutdown worker celery@worker1
-```
-
-**Calls:** `POST /api/workers/{worker_name}/shutdown`
-
-### scale_worker_pool
-
-Scale a worker's pool size up or down.
-
-**Parameters:**
-- `worker_name`: Name of the worker
-- `delta`: Number of processes to add (positive) or remove (negative)
-
-**Example:**
-```
-Increase pool size for celery@worker1 by 2
-```
-
-**Calls:** `POST /api/workers/{worker_name}/scale`
-
-### get_active_tasks
-
-Get currently executing tasks.
-
-**Parameters:**
-- `worker_name` (optional): Filter by specific worker
-
-**Example:**
-```
-What tasks are currently running?
-```
-
-**Calls:** `GET /api/workers/active-tasks`
+When authentication is disabled, all endpoints are open. `/health`, `/`, and
+`/metrics` remain open regardless.
+
+## REST API
+
+The API server (port 8000) exposes a REST API for tasks, workers, orphans,
+retries, and metrics. Interactive docs are available at:
+
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+- Raw OpenAPI schema: `http://localhost:8000/openapi.json`
+
+| Area | Endpoints |
+|------|-----------|
+| **Tasks** | `GET /api/tasks`, `GET /api/tasks/{id}`, `GET /api/tasks/{id}/timeline`, `GET /api/tasks/{id}/chain`, `GET /api/tasks/summary`, `GET /api/tasks/orphaned` |
+| **Task actions** | `POST /api/tasks/{id}/revoke`, `POST /api/tasks/{id}/retry` |
+| **Workers** | `GET /api/workers`, `GET /api/workers/list`, `GET /api/workers/{name}/stats`, `GET /api/workers/active-tasks` |
+| **Worker actions** | `POST /api/workers/{name}/shutdown`, `POST /api/workers/{name}/scale` |
+| **Ops** | `GET /health`, `GET /metrics` |
+
+The `/openapi.json` schema is the authoritative reference — this README lists
+only endpoint groups.
 
 ## Troubleshooting
 
-### Common Issues
+### Worker not appearing / no events in the database
 
-#### Database Connection Errors
-
-**Error**: `connection refused` or `role "user" does not exist`
-
-**Solutions**:
-1. Verify PostgreSQL is running: `pg_isready`
-2. Check DATABASE_URL format: `postgresql+asyncpg://user:pass@host:port/dbname`
-3. Verify database exists: `psql -U user -l | grep dbname`
-4. Check user permissions: `psql -U postgres -c "\du"`
-
-#### RabbitMQ Connection Errors
-
-**Error**: `ConnectionRefusedError` or `Socket closed`
-
-**Solutions**:
-1. Verify RabbitMQ is running: `rabbitmqctl status`
-2. Check CELERY_BROKER_URL format: `amqp://user:pass@host:port/vhost`
-3. Verify vhost exists: `rabbitmqctl list_vhosts`
-4. Check user permissions: `rabbitmqctl list_permissions`
-
-#### Consumer Not Receiving Events
-
-**Symptoms**: Consumer starts but no events appear in database
-
-**Diagnostic Steps**:
-1. Check consumer logs for connection success:
+1. Verify workers emit events — start with `-E` or set `worker_send_task_events`.
+2. Check the consumer connected:
    ```bash
    make consume 2>&1 | grep "Connected to Celery broker"
    ```
-
-2. Verify Celery workers are sending events:
+3. Verify events reach the broker:
    ```bash
    celery -A your_app events --dump
    ```
-
-3. Check RabbitMQ queues:
-   ```bash
-   rabbitmqctl list_queues name messages consumers
-   ```
-
-4. Verify events are in database:
+4. Check event counts in the database:
    ```sql
    SELECT COUNT(*) FROM task_events;
    SELECT COUNT(*) FROM worker_events;
    ```
 
-#### MCP Server Not Starting
+### Database connection errors
 
-**Error**: Port already in use or connection refused
+- `pg_isready` to confirm PostgreSQL is up.
+- Check `DATABASE_URL` format: `postgresql+asyncpg://user:pass@host:port/dbname`.
+- Verify the role has access to the database.
 
-**Solutions**:
-1. Check if port 8001 is in use:
-   ```bash
-   lsof -i :8001
-   # or
-   netstat -tulpn | grep 8001
-   ```
+### Broker connection errors
 
-2. Kill existing process:
-   ```bash
-   kill $(lsof -t -i :8001)
-   ```
+- `rabbitmqctl status` (or your broker's health check) to confirm it's running.
+- Check `CELERY_BROKER_URL` format and credentials.
 
-3. Verify MCP server is running:
-   ```bash
-   curl http://localhost:8001/mcp
-   ```
+### Port already in use
 
-#### API Server Issues
+- API: `lsof -i :8000` / MCP: `lsof -i :8001`
+- Kill the offending process: `kill $(lsof -t -i :8001)`
 
-**Error**: FastAPI not starting or endpoints returning errors
+### Getting help
 
-**Solutions**:
-1. Check if port 8000 is in use:
-   ```bash
-   lsof -i :8000
-   ```
-
-2. Verify API server is running:
-   ```bash
-   curl http://localhost:8000/health
-   ```
-
-3. Check API logs for errors:
-   ```bash
-   make api 2>&1 | grep ERROR
-   ```
-
-### Diagnostic Commands
-
-**Check all services are running**:
-```bash
-# API server
-curl -s http://localhost:8000/health
-
-# MCP server
-curl -s http://localhost:8001/mcp
-
-# Database connection
-psql $DATABASE_URL -c "SELECT 1"
-
-# RabbitMQ connection
-rabbitmqctl status
-```
-
-**Check event flow**:
-```bash
-# Count events in database
-psql $DATABASE_URL -c "
-  SELECT 
-    'task_events' as table_name, 
-    COUNT(*) as count 
-  FROM task_events
-  UNION ALL
-  SELECT 
-    'worker_events', 
-    COUNT(*) 
-  FROM worker_events
-"
-
-# Check latest events
-psql $DATABASE_URL -c "
-  SELECT event_type, timestamp, hostname 
-  FROM task_events 
-  ORDER BY timestamp DESC 
-  LIMIT 5
-"
-```
-
-**View logs**:
-```bash
-# API server logs
-make api 2>&1 | tee api.log
-
-# Consumer logs
-make consume 2>&1 | tee consume.log
-
-# MCP server logs
-make mcp 2>&1 | tee mcp.log
-```
-
-### Getting Help
-
-If you encounter issues not covered here:
-
-1. Check existing issues: https://github.com/KalvadTech/taskowl/issues
-2. Open a new issue with:
-   - Error messages (full stack trace)
-   - Environment details (Python version, OS, PostgreSQL version)
-   - Steps to reproduce
-   - Relevant logs (sanitized of sensitive data)
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details
+Open an issue with the error message, environment details, steps to reproduce,
+and relevant (sanitized) logs:
+https://github.com/KalvadTech/taskowl/issues
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines on development setup, code style, testing, and the pull request process.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, code style,
+testing, and the pull request process.
+
+## License
+
+MIT — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- [Flower](https://github.com/mher/flower) - The original Celery monitor
-- [Kanchi](https://github.com/getkanchi/kanchi) - Modern Celery monitoring inspiration
+- [Flower](https://github.com/mher/flower) — the original Celery monitor
+- [Kanchi](https://github.com/getkanchi/kanchi) — modern Celery monitoring inspiration
+- [Shaper](https://github.com/taleshape-com/shaper) — SQL-first dashboards

@@ -56,8 +56,6 @@ line-length = 100
 exclude = [
     "*.md",
     "docs/",
-    "PLAN.md",
-    "REFACTORING.md",
 ]
 
 [tool.ruff.lint]

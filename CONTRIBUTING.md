@@ -6,60 +6,13 @@ Thank you for your interest in contributing to taskowl! This guide will help you
 
 Please be respectful and constructive in all interactions. We're building a welcoming community.
 
-## Development Setup
+## Getting Started
 
-### Prerequisites
-
-- Python 3.14+
-- PostgreSQL 14+
-- RabbitMQ
-- [uv](https://github.com/astral-sh/uv) package manager
-
-### Initial Setup
-
-1. **Fork and clone the repository**:
-   ```bash
-   git clone https://github.com/KalvadTech/taskowl.git
-   cd taskowl
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   make install
-   ```
-
-3. **Set up environment variables**:
-   ```bash
-   export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/taskowl"
-   export CELERY_BROKER_URL="amqp://guest:guest@localhost:5672//"
-   ```
-
-4. **Run database migrations**:
-   ```bash
-   make migrate
-   ```
-
-5. **Verify setup**:
-   ```bash
-   make check  # Should pass all checks
-   ```
+See the [README](README.md) **Quick Start** for prerequisites, installation,
+environment variables, and how to run the API server, consumer, and MCP server.
+Set up your local environment there first, then read the rest of this guide.
 
 ## Development Workflow
-
-### Running Services
-
-You'll typically need three services running during development:
-
-```bash
-# Terminal 1: API server
-make api
-
-# Terminal 2: Event consumer
-make consume
-
-# Terminal 3: MCP server
-make mcp
-```
 
 ### Making Changes
 
@@ -105,7 +58,7 @@ make mcp
    # Good
    def get_task(task_id: str) -> dict:
        ...
-   
+
    # Bad
    def get_task(task_id):
        ...
@@ -117,7 +70,7 @@ make mcp
    async def fetch_data() -> list[dict]:
        async with session.execute(query) as result:
            return result.fetchall()
-   
+
    # Bad
    def fetch_data():
        # blocking I/O
@@ -131,7 +84,7 @@ make mcp
    except ValueError as e:
        logger.error(f"Invalid input: {e}")
        raise
-   
+
    # Bad
    try:
        result = await query()
@@ -144,13 +97,13 @@ make mcp
    def complex_function(param: str) -> dict:
        """
        Brief description of what this function does.
-       
+
        Args:
            param: Description of parameter
-       
+
        Returns:
            Description of return value
-       
+
        Raises:
            ValueError: When param is invalid
        """
@@ -166,9 +119,6 @@ make test
 
 # Run specific test file
 uv run pytest tests/test_queries.py -v
-
-# Run with coverage (future enhancement)
-uv run pytest --cov=taskowl
 ```
 
 ### Writing Tests
@@ -190,10 +140,10 @@ async def test_list_tasks_with_filter(db_session: AsyncSession):
         timestamp=datetime.now(UTC),
     ))
     await db_session.commit()
-    
+
     # Act
     result = await list_tasks_query(state="succeeded", session=db_session)
-    
+
     # Assert
     assert len(result) == 1
     assert result[0]["id"] == str(task_id)
@@ -205,40 +155,6 @@ async def test_list_tasks_with_filter(db_session: AsyncSession):
 - **API endpoints**: Test all REST endpoints
 - **Handlers**: Test event handlers
 - **Edge cases**: Empty data, invalid inputs, error conditions
-
-## Architecture Overview
-
-For detailed architecture documentation, see [PLAN.md](./PLAN.md).
-
-### Key Components
-
-1. **API Server** (`src/taskowl/main.py`)
-   - FastAPI application
-   - REST endpoints for tasks, workers, summaries
-   - Dependency injection for database sessions
-
-2. **Query Layer** (`src/taskowl/queries.py`)
-   - Reusable query functions
-   - Event sourcing logic
-   - State reconstruction from events
-
-3. **Event Consumer** (`src/taskowl/consumer/`)
-   - Celery event receiver
-   - Event handlers for different event types
-   - Database persistence
-
-4. **MCP Server** (`src/taskowl/mcp/`)
-   - MCP protocol implementation
-   - Tools that call REST API
-   - HTTP transport on port 8001
-
-### Data Flow
-
-```
-Celery Workers → RabbitMQ → Consumer → PostgreSQL
-                                         ↓
-                                    REST API ← MCP Server → LLM
-```
 
 ## Pull Request Process
 
