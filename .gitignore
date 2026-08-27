@@ -46,9 +46,6 @@ htmlcov/
 # ruff
 .ruff_cache/
 
-# uv
-uv.lock
-
 # Database
 *.db
 *.sqlite
