@@ -89,11 +89,21 @@ async def test_worker_is_offline_recent_heartbeat(db_session: AsyncSession):
 async def test_orphaned_task_detected(db_session: AsyncSession):
     """Task started > grace with offline worker should be orphaned."""
     now = datetime.now(UTC)
+    task_id = uuid.uuid4()
 
     db_session.add(
         TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now - timedelta(seconds=301),
+            hostname="worker1@localhost",
+            name="myapp.tasks.orphaned_job",
+        )
+    )
+    db_session.add(
+        TaskEvent(
             event_type="started",
-            task_id=uuid.uuid4(),
+            task_id=task_id,
             timestamp=now - timedelta(seconds=300),
             hostname="worker1@localhost",
         )
@@ -112,6 +122,8 @@ async def test_orphaned_task_detected(db_session: AsyncSession):
     assert len(result) == 1
     assert result[0]["state"] == "orphaned"
     assert result[0]["worker"] == "worker1@localhost"
+    # name is reconstructed from the 'received' event
+    assert result[0]["name"] == "myapp.tasks.orphaned_job"
 
 
 @pytest.mark.asyncio

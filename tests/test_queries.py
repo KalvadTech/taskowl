@@ -54,9 +54,43 @@ async def test_list_tasks_with_data(db_session: AsyncSession):
     assert len(result) == 1
     assert result[0]["id"] == str(task_id)
     assert result[0]["state"] == "succeeded"  # Latest state
-    # Note: name is only in the "received" event, not in "succeeded" event
-    # The query returns the latest event's data, so name will be None
+    # name is reconstructed from the earliest event that carries it ('received')
+    assert result[0]["name"] == "test_task"
     assert result[0]["worker"] == "worker1@localhost"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_filter_by_name_completed(db_session: AsyncSession):
+    """Name filter should match completed tasks (name lives on 'received')."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="myapp.tasks.process",
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="succeeded",
+            task_id=task_id,
+            timestamp=now + timedelta(seconds=1),
+            hostname="worker1@localhost",
+        )
+    )
+    await db_session.commit()
+
+    result = await list_tasks_query(name="myapp.tasks.process", session=db_session)
+    assert len(result) == 1
+    assert result[0]["name"] == "myapp.tasks.process"
+
+    # Filter with a non-matching name should return nothing
+    result = await list_tasks_query(name="other.task", session=db_session)
+    assert result == []
 
 
 @pytest.mark.asyncio

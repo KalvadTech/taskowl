@@ -51,11 +51,10 @@ async def _list_tasks_impl(
     limit: int,
 ) -> list[dict]:
     """Internal implementation of list_tasks_query."""
-    # Get latest event per task using a subquery to find max timestamp per task
     # This approach works with both PostgreSQL and SQLite
     from sqlalchemy import func as sql_func
 
-    # Subquery to get max timestamp per task
+    # Subquery to get max timestamp per task (latest event)
     max_timestamps = (
         select(
             TaskEvent.task_id,
@@ -65,18 +64,46 @@ async def _list_tasks_impl(
         .subquery()
     )
 
+    # Subquery to get the earliest event that carries a name, per task
+    earliest_named_ts = (
+        select(
+            TaskEvent.task_id,
+            sql_func.min(TaskEvent.timestamp).label("name_ts"),
+        )
+        .where(TaskEvent.name.isnot(None))
+        .group_by(TaskEvent.task_id)
+        .subquery()
+    )
+    task_names = (
+        select(TaskEvent.task_id, TaskEvent.name)
+        .join(
+            earliest_named_ts,
+            (TaskEvent.task_id == earliest_named_ts.c.task_id)
+            & (TaskEvent.timestamp == earliest_named_ts.c.name_ts),
+        )
+        .subquery()
+    )
+
     # Main query to get the full event records
-    query = select(TaskEvent).join(
-        max_timestamps,
-        (TaskEvent.task_id == max_timestamps.c.task_id)
-        & (TaskEvent.timestamp == max_timestamps.c.max_ts),
+    query = (
+        select(TaskEvent, task_names.c.name.label("task_name"))
+        .join(
+            max_timestamps,
+            (TaskEvent.task_id == max_timestamps.c.task_id)
+            & (TaskEvent.timestamp == max_timestamps.c.max_ts),
+        )
+        .join(
+            task_names,
+            TaskEvent.task_id == task_names.c.task_id,
+            isouter=True,
+        )
     )
 
     # Apply filters
     if state:
         query = query.where(TaskEvent.event_type == state.lower())
     if name:
-        query = query.where(TaskEvent.name == name)
+        query = query.where(task_names.c.name == name)
     if worker:
         query = query.where(TaskEvent.hostname == worker)
     if since:
@@ -87,15 +114,15 @@ async def _list_tasks_impl(
     query = query.limit(limit)
 
     result = await session.execute(query)
-    events = result.scalars().all()
+    rows = result.all()
 
     # Format response
     task_list = []
-    for event in events:
+    for event, task_name in rows:
         task_list.append(
             {
                 "id": str(event.task_id),
-                "name": event.name,
+                "name": task_name,
                 "state": event.event_type,
                 "worker": event.hostname,
                 "queue": event.queue,
@@ -544,7 +571,45 @@ async def _list_orphaned_tasks_impl(session: AsyncSession, limit: int) -> list[d
                 }
             )
 
+    # Reconstruct the task name from the earliest named event (the latest
+    # event of an orphan is 'started', which does not carry the name)
+    if orphaned_tasks:
+        task_ids = [t["id"] for t in orphaned_tasks if t["id"] is not None]
+        names = await _task_names_map(session, task_ids)
+        for task in orphaned_tasks:
+            task["name"] = names.get(task["id"])
+
     return orphaned_tasks[:limit]
+
+
+async def _task_names_map(session: AsyncSession, task_ids: list[str]) -> dict[str, str | None]:
+    """Return {task_id: name} using each task's earliest named event.
+
+    The task name is only present on 'sent'/'received' events, so the latest
+    event (e.g. 'succeeded', 'started') usually does not carry it. This maps
+    each task id to the name found on its earliest event that has one.
+    """
+    from sqlalchemy import func as sql_func
+
+    earliest_named_ts = (
+        select(
+            TaskEvent.task_id,
+            sql_func.min(TaskEvent.timestamp).label("name_ts"),
+        )
+        .where(
+            TaskEvent.task_id.in_([uuid.UUID(t) for t in task_ids]),
+            TaskEvent.name.isnot(None),
+        )
+        .group_by(TaskEvent.task_id)
+        .subquery()
+    )
+    query = select(TaskEvent.task_id, TaskEvent.name).join(
+        earliest_named_ts,
+        (TaskEvent.task_id == earliest_named_ts.c.task_id)
+        & (TaskEvent.timestamp == earliest_named_ts.c.name_ts),
+    )
+    result = await session.execute(query)
+    return {str(task_id): name for task_id, name in result.all()}
 
 
 async def get_task_chain_query(task_id: str, session: AsyncSession | None = None) -> dict:
