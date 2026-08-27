@@ -315,4 +315,3 @@ MIT — see [LICENSE](LICENSE) for details.
 
 - [Flower](https://github.com/mher/flower) — the original Celery monitor
 - [Kanchi](https://github.com/getkanchi/kanchi) — modern Celery monitoring inspiration
-- [Shaper](https://github.com/taleshape-com/shaper) — SQL-first dashboards
