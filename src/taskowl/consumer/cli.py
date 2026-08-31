@@ -18,7 +18,6 @@ async def run_consumer() -> None:
     )
 
     logger.info("Starting taskowl consumer...")
-    logger.info(f"Broker URL: {settings.celery_broker_url}")
 
     consumer = CeleryEventConsumer(settings.celery_broker_url)
     await consumer.start()
