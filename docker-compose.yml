@@ -1,0 +1,80 @@
+x-taskowl-env: &taskowl-env
+  DATABASE_URL: postgresql+asyncpg://taskowl:taskowl@postgres:5432/taskowl
+  CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+  API_KEY: ${API_KEY:-}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+services:
+  api:
+    build: .
+    command: ["uv", "run", "--no-sync", "taskowl"]
+    environment: *taskowl-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  consume:
+    build: .
+    command: ["uv", "run", "--no-sync", "taskowl-consume"]
+    environment: *taskowl-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  mcp:
+    build: .
+    command: ["uv", "run", "--no-sync", "taskowl-mcp"]
+    environment:
+      <<: *taskowl-env
+      TASKOWL_HOST: api
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_USER: taskowl
+      POSTGRES_PASSWORD: taskowl
+      POSTGRES_DB: taskowl
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskowl"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4.3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
