@@ -13,7 +13,7 @@ from taskowl.config import settings
 def _get_headers() -> dict[str, str]:
     """Get HTTP headers for API requests, including auth if configured."""
     headers: dict[str, str] = {}
-    if settings.api_key is not None:
+    if settings.api_key:
         headers["Authorization"] = f"Bearer {settings.api_key}"
     return headers
 
