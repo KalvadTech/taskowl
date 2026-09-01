@@ -110,11 +110,15 @@ If authentication is enabled (see below), send the taskowl API key as
 
 | Category | Tools |
 |---|---|
-| **Tasks** | `list_tasks`, `get_task`, `get_task_timeline`, `get_task_chain`, `get_task_summary`, `list_orphaned_tasks` |
+| **Tasks** | `list_tasks`, `get_task`, `get_task_timeline`, `get_task_chain`, `get_task_summary`, `list_task_types`, `list_orphaned_tasks` |
 | **Task actions** | `revoke_task`, `retry_task` |
 | **Workers** | `get_worker_status`, `list_workers`, `get_worker_stats`, `shutdown_worker`, `scale_worker_pool`, `get_active_tasks` |
 
-**Total: 14 tools**
+**Total: 15 tools**
+
+`list_tasks` supports exact filters (`state`, `name`, `worker`, `since`), a partial
+case-insensitive `search` on the task name, `offset` for pagination, and `sort_by`
+(`timestamp` [default, newest-first], `name`, `state`, `worker`).
 
 ## Examples
 
@@ -123,6 +127,7 @@ Questions you can ask your AI assistant when the MCP server is connected:
 | Question | Tools used |
 |---|---|
 | "Show me failed tasks from the last hour" | `list_tasks` |
+| "Which task types are running?" | `list_task_types` |
 | "Which tasks are orphaned?" | `list_orphaned_tasks` |
 | "Show me the timeline for task abc" | `get_task_timeline` |
 | "What's the retry chain for task abc?" | `get_task_chain` |
@@ -252,7 +257,7 @@ retries, and metrics. Interactive docs are available at:
 
 | Area | Endpoints |
 |------|-----------|
-| **Tasks** | `GET /api/tasks`, `GET /api/tasks/{id}`, `GET /api/tasks/{id}/timeline`, `GET /api/tasks/{id}/chain`, `GET /api/tasks/summary`, `GET /api/tasks/orphaned` |
+| **Tasks** | `GET /api/tasks`, `GET /api/tasks/{id}`, `GET /api/tasks/{id}/timeline`, `GET /api/tasks/{id}/chain`, `GET /api/tasks/summary`, `GET /api/tasks/types`, `GET /api/tasks/orphaned` |
 | **Task actions** | `POST /api/tasks/{id}/revoke`, `POST /api/tasks/{id}/retry` |
 | **Workers** | `GET /api/workers`, `GET /api/workers/list`, `GET /api/workers/{name}/stats`, `GET /api/workers/active-tasks` |
 | **Worker actions** | `POST /api/workers/{name}/shutdown`, `POST /api/workers/{name}/scale` |

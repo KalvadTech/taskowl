@@ -114,6 +114,105 @@ async def test_api_list_tasks_with_filters(client: AsyncClient, db_session: Asyn
 
 
 @pytest.mark.asyncio
+async def test_api_list_tasks_search_offset_sort(client: AsyncClient, db_session: AsyncSession):
+    """Test GET /api/tasks with search, offset, and sort_by params."""
+    now = datetime.now(UTC)
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=uuid.uuid4(),
+            timestamp=now + timedelta(seconds=2),
+            hostname="worker1@localhost",
+            name="zeta_task",
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=uuid.uuid4(),
+            timestamp=now + timedelta(seconds=1),
+            hostname="worker1@localhost",
+            name="alpha_task",
+        )
+    )
+    await db_session.commit()
+
+    # search partial match
+    response = await client.get("/api/tasks?search=TASK")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+
+    # search no match
+    response = await client.get("/api/tasks?search=nope")
+    assert response.status_code == 200
+    assert response.json() == []
+
+    # sort_by name ascending
+    response = await client.get("/api/tasks?sort_by=name")
+    assert response.status_code == 200
+    data = response.json()
+    assert [t["name"] for t in data] == ["alpha_task", "zeta_task"]
+
+    # invalid sort_by -> 400
+    response = await client.get("/api/tasks?sort_by=bogus")
+    assert response.status_code == 400
+
+    # offset skips newest first (default timestamp desc)
+    response = await client.get("/api/tasks?offset=1")
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
+@pytest.mark.asyncio
+async def test_api_list_task_types(client: AsyncClient, db_session: AsyncSession):
+    """Test GET /api/tasks/types returns distinct names with counts."""
+    now = datetime.now(UTC)
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=uuid.uuid4(),
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="app.tasks.alpha",
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=uuid.uuid4(),
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="app.tasks.alpha",
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=uuid.uuid4(),
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="app.tasks.beta",
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/tasks/types")
+    assert response.status_code == 200
+    data = response.json()
+    by_name = {t["name"]: t["count"] for t in data}
+    assert by_name == {"app.tasks.alpha": 2, "app.tasks.beta": 1}
+
+
+@pytest.mark.asyncio
+async def test_api_list_task_types_empty(client: AsyncClient):
+    """Test GET /api/tasks/types with no data."""
+    response = await client.get("/api/tasks/types")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
 async def test_api_get_task_summary_empty(client: AsyncClient):
     """Test GET /api/tasks/summary with no data."""
     response = await client.get("/api/tasks/summary")
