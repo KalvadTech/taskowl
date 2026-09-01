@@ -13,6 +13,7 @@ from taskowl.queries import (
     get_task_summary_query,
     get_task_timeline_query,
     get_worker_status_query,
+    list_task_types_query,
     list_tasks_query,
 )
 
@@ -250,6 +251,147 @@ async def test_list_tasks_limit(db_session: AsyncSession):
 
     result = await list_tasks_query(limit=3, session=db_session)
     assert len(result) == 3
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_filter_by_search(db_session: AsyncSession):
+    """Test list_tasks_query with partial search filter."""
+    task1_id = uuid.uuid4()
+    task2_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task1_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="myapp.tasks.process",
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task2_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="other.module.cleanup",
+        )
+    )
+    await db_session.commit()
+
+    # Partial, case-insensitive match
+    result = await list_tasks_query(search="PROCESS", session=db_session)
+    assert len(result) == 1
+    assert result[0]["id"] == str(task1_id)
+
+    # No match
+    result = await list_tasks_query(search="nonexistent", session=db_session)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_offset(db_session: AsyncSession):
+    """Test list_tasks_query with offset pagination."""
+    now = datetime.now(UTC)
+    task_ids = []
+    for i in range(5):
+        task_id = uuid.uuid4()
+        task_ids.append(str(task_id))
+        db_session.add(
+            TaskEvent(
+                event_type="received",
+                task_id=task_id,
+                timestamp=now + timedelta(seconds=i),
+                hostname="worker1@localhost",
+            )
+        )
+    await db_session.commit()
+
+    # Default sort is newest-first, so skipping 2 skips the 2 newest
+    result = await list_tasks_query(limit=10, offset=2, session=db_session)
+    assert len(result) == 3
+    assert result[0]["id"] not in task_ids[3:]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_sort_by_name(db_session: AsyncSession):
+    """Test list_tasks_query sorted by name."""
+    now = datetime.now(UTC)
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=uuid.uuid4(),
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="zeta",
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=uuid.uuid4(),
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="alpha",
+        )
+    )
+    await db_session.commit()
+
+    result = await list_tasks_query(sort_by="name", session=db_session)
+    assert len(result) == 2
+    assert result[0]["name"] == "alpha"
+    assert result[1]["name"] == "zeta"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_invalid_sort_by(db_session: AsyncSession):
+    """Test list_tasks_query with invalid sort_by."""
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=uuid.uuid4(),
+            timestamp=datetime.now(UTC),
+            hostname="worker1@localhost",
+        )
+    )
+    await db_session.commit()
+
+    result = await list_tasks_query(sort_by="bogus", session=db_session)
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_list_task_types(db_session: AsyncSession):
+    """Test list_task_types_query returns distinct names with counts."""
+    now = datetime.now(UTC)
+    for name, count in [("app.tasks.a", 2), ("app.tasks.b", 1)]:
+        for _ in range(count):
+            db_session.add(
+                TaskEvent(
+                    event_type="received",
+                    task_id=uuid.uuid4(),
+                    timestamp=now,
+                    hostname="worker1@localhost",
+                    name=name,
+                )
+            )
+    await db_session.commit()
+
+    result = await list_task_types_query(session=db_session)
+    assert len(result) == 2
+    by_name = {r["name"]: r["count"] for r in result}
+    assert by_name["app.tasks.a"] == 2
+    assert by_name["app.tasks.b"] == 1
+    # Ordered by count desc
+    assert result[0]["name"] == "app.tasks.a"
+
+
+@pytest.mark.asyncio
+async def test_list_task_types_empty(db_session: AsyncSession):
+    """Test list_task_types_query with no data."""
+    result = await list_task_types_query(session=db_session)
+    assert result == []
 
 
 @pytest.mark.asyncio

@@ -31,18 +31,24 @@ def register_tools(server: MCPServer) -> None:
         worker: str | None = None,
         since: str | None = None,
         limit: int = 100,
+        search: str | None = None,
+        offset: int = 0,
+        sort_by: str = "timestamp",
     ) -> list[dict]:
         """List tasks with optional filters.
 
         Args:
             state: Filter by state (received, started, succeeded, failed, retried, revoked)
-            name: Filter by task name
+            name: Filter by exact task name
             worker: Filter by worker hostname
             since: Only tasks created after this datetime (ISO 8601)
             limit: Max number of tasks to return (default: 100)
+            search: Partial, case-insensitive match on task name
+            offset: Number of tasks to skip (for pagination)
+            sort_by: Sort key (timestamp, name, state, worker). Defaults to timestamp, newest first
         """
         async with httpx.AsyncClient() as client:
-            params = {"limit": limit}
+            params = {"limit": limit, "offset": offset, "sort_by": sort_by}
             if state is not None:
                 params["state"] = state
             if name is not None:
@@ -51,10 +57,31 @@ def register_tools(server: MCPServer) -> None:
                 params["worker"] = worker
             if since is not None:
                 params["since"] = since
+            if search is not None:
+                params["search"] = search
 
             response = await client.get(
                 f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks",
                 params=params,
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="list_task_types",
+        description="List distinct task names (types) with their task counts",
+    )
+    async def list_task_types(limit: int = 50) -> list[dict]:
+        """List distinct task names with task counts.
+
+        Args:
+            limit: Max number of task types to return (default: 50)
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks/types",
+                params={"limit": limit},
                 headers=_get_headers(),
             )
             response.raise_for_status()

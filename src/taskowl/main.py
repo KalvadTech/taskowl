@@ -21,6 +21,7 @@ from taskowl.queries import (
     get_task_timeline_query,
     get_worker_status_query,
     list_orphaned_tasks_query,
+    list_task_types_query,
     list_tasks_query,
 )
 from taskowl.workers import (
@@ -112,11 +113,29 @@ async def api_list_tasks(
     worker: str | None = None,
     since: str | None = None,
     limit: int = 100,
+    search: str | None = None,
+    offset: int = 0,
+    sort_by: str = "timestamp",
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> list[dict] | dict:
+    """List tasks with optional filters."""
+    result = await list_tasks_query(
+        state, name, worker, since, limit, search, offset, sort_by, session
+    )
+    if isinstance(result, dict) and "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/api/tasks/types")
+async def api_list_task_types(
+    limit: int = 50,
     session: AsyncSession = Depends(get_db),
     _: None = Depends(verify_api_key),
 ) -> list[dict]:
-    """List tasks with optional filters."""
-    return await list_tasks_query(state, name, worker, since, limit, session)
+    """List distinct task names (types) with their task counts."""
+    return await list_task_types_query(limit, session)
 
 
 @app.get("/api/tasks/summary")

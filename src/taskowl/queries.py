@@ -21,16 +21,22 @@ async def list_tasks_query(
     worker: str | None = None,
     since: str | None = None,
     limit: int = 100,
+    search: str | None = None,
+    offset: int = 0,
+    sort_by: str = "timestamp",
     session: AsyncSession | None = None,
-) -> list[dict]:
+) -> list[dict] | dict:
     """List tasks with optional filters.
 
     Args:
         state: Filter by state (received, started, succeeded, failed, retried, revoked)
-        name: Filter by task name
+        name: Filter by exact task name
         worker: Filter by worker hostname
         since: Only tasks created after this datetime (ISO 8601)
         limit: Max number of tasks to return (default: 100)
+        search: Partial, case-insensitive match on task name
+        offset: Number of tasks to skip (for pagination)
+        sort_by: Sort key (timestamp, name, state, worker). Defaults to timestamp, newest first
         session: Optional database session (for testing)
 
     Returns:
@@ -38,8 +44,12 @@ async def list_tasks_query(
     """
     if session is None:
         async with async_session_maker() as session:
-            return await _list_tasks_impl(session, state, name, worker, since, limit)
-    return await _list_tasks_impl(session, state, name, worker, since, limit)
+            return await _list_tasks_impl(
+                session, state, name, worker, since, limit, search, offset, sort_by
+            )
+    return await _list_tasks_impl(
+        session, state, name, worker, since, limit, search, offset, sort_by
+    )
 
 
 async def _list_tasks_impl(
@@ -49,7 +59,10 @@ async def _list_tasks_impl(
     worker: str | None,
     since: str | None,
     limit: int,
-) -> list[dict]:
+    search: str | None,
+    offset: int,
+    sort_by: str,
+) -> list[dict] | dict:
     """Internal implementation of list_tasks_query."""
     # This approach works with both PostgreSQL and SQLite
     from sqlalchemy import func as sql_func
@@ -104,14 +117,33 @@ async def _list_tasks_impl(
         query = query.where(TaskEvent.event_type == state.lower())
     if name:
         query = query.where(task_names.c.name == name)
+    if search:
+        query = query.where(task_names.c.name.ilike(f"%{search}%"))
     if worker:
         query = query.where(TaskEvent.hostname == worker)
     if since:
         since_dt = datetime.fromisoformat(since)
         query = query.where(TaskEvent.timestamp >= since_dt)
 
-    # Apply limit
-    query = query.limit(limit)
+    # Apply ordering
+    sort_keys = {
+        "timestamp": TaskEvent.timestamp,
+        "name": task_names.c.name,
+        "state": TaskEvent.event_type,
+        "worker": TaskEvent.hostname,
+    }
+    if sort_by not in sort_keys:
+        return {"error": f"Invalid sort_by: {sort_by}. Must be one of {list(sort_keys)}"}
+    column = sort_keys[sort_by]
+    if sort_by == "timestamp":
+        # Newest first by default
+        query = query.order_by(column.desc())
+    else:
+        query = query.order_by(column.asc())
+
+    # Apply limit/offset
+    offset = max(offset, 0)
+    query = query.offset(offset).limit(limit)
 
     result = await session.execute(query)
     rows = result.all()
@@ -131,6 +163,59 @@ async def _list_tasks_impl(
         )
 
     return task_list
+
+
+async def list_task_types_query(
+    limit: int = 50,
+    session: AsyncSession | None = None,
+) -> list[dict]:
+    """List distinct task names (types) with their task counts.
+
+    Args:
+        limit: Max number of task types to return (default: 50)
+        session: Optional database session (for testing)
+
+    Returns:
+        List of dicts with name and count, ordered by count descending
+    """
+    if session is None:
+        async with async_session_maker() as session:
+            return await _list_task_types_impl(session, limit)
+    return await _list_task_types_impl(session, limit)
+
+
+async def _list_task_types_impl(session: AsyncSession, limit: int) -> list[dict]:
+    """Internal implementation of list_task_types_query."""
+    from sqlalchemy import func as sql_func
+
+    # Task name is only present on the earliest named event per task
+    earliest_named_ts = (
+        select(
+            TaskEvent.task_id,
+            sql_func.min(TaskEvent.timestamp).label("name_ts"),
+        )
+        .where(TaskEvent.name.isnot(None))
+        .group_by(TaskEvent.task_id)
+        .subquery()
+    )
+    task_names = (
+        select(TaskEvent.task_id, TaskEvent.name)
+        .join(
+            earliest_named_ts,
+            (TaskEvent.task_id == earliest_named_ts.c.task_id)
+            & (TaskEvent.timestamp == earliest_named_ts.c.name_ts),
+        )
+        .subquery()
+    )
+
+    query = (
+        select(task_names.c.name, sql_func.count().label("count"))
+        .group_by(task_names.c.name)
+        .order_by(sql_func.count().desc(), task_names.c.name.asc())
+        .limit(limit)
+    )
+    result = await session.execute(query)
+    return [{"name": row[0], "count": row[1]} for row in result.all()]
 
 
 async def get_task_query(task_id: str, session: AsyncSession | None = None) -> dict:
