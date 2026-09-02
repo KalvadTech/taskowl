@@ -24,6 +24,7 @@ from taskowl.queries import (
     list_task_types_query,
     list_tasks_query,
 )
+from taskowl.queues import list_queues
 from taskowl.workers import (
     get_active_tasks,
     get_worker_stats,
@@ -312,6 +313,17 @@ async def api_get_active_tasks(
         worker_name: Optional worker name to filter by
     """
     return await get_active_tasks(worker_name)
+
+
+@app.get("/api/queues")
+async def api_list_queues(
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """List Celery broker queues with message and consumer counts."""
+    result = await list_queues()
+    if "error" in result:
+        raise HTTPException(status_code=502, detail=result["error"])
+    return result
 
 
 # MCP server is now run separately via taskowl-mcp command
