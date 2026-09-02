@@ -327,3 +327,17 @@ def register_tools(server: MCPServer) -> None:
             )
             response.raise_for_status()
             return response.json()
+
+    @server.tool(
+        name="list_queues",
+        description="List Celery broker queues with message and consumer counts",
+    )
+    async def list_queues() -> dict:
+        """List Celery broker queues with message and consumer counts."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/queues",
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()

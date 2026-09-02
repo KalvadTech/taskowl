@@ -849,6 +849,31 @@ async def test_api_get_active_tasks_with_worker_filter(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_api_list_queues(client: AsyncClient):
+    """Test GET /api/queues."""
+    with patch("taskowl.queues._list_queues_sync") as mock_list_queues:
+        mock_list_queues.return_value = {
+            "queues": [{"name": "celery", "messages": 3, "consumers": 1}],
+            "total_messages": 3,
+        }
+
+        response = await client.get("/api/queues")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_messages"] == 3
+        assert data["queues"][0]["name"] == "celery"
+
+
+@pytest.mark.asyncio
+async def test_api_list_queues_error(client: AsyncClient):
+    """Test GET /api/queues when the broker fails."""
+    with patch("taskowl.queues._list_queues_sync", side_effect=Exception("Broker down")):
+        response = await client.get("/api/queues")
+        assert response.status_code == 502
+        assert "Broker down" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_api_list_orphaned_tasks_empty(client: AsyncClient):
     """Test GET /api/tasks/orphaned with no orphaned tasks."""
     response = await client.get("/api/tasks/orphaned")
