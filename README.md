@@ -111,11 +111,11 @@ If authentication is enabled (see below), send the taskowl API key as
 | Category | Tools |
 |---|---|
 | **Tasks** | `list_tasks`, `get_task`, `get_task_timeline`, `get_task_chain`, `get_task_summary`, `list_task_types`, `list_orphaned_tasks` |
-| **Task actions** | `revoke_task`, `retry_task` |
+| **Task actions** | `revoke_task`, `retry_task`, `execute_task` |
 | **Workers** | `get_worker_status`, `list_workers`, `get_worker_stats`, `shutdown_worker`, `scale_worker_pool`, `get_active_tasks` |
 | **Queues** | `list_queues` |
 
-**Total: 16 tools**
+**Total: 17 tools**
 
 `list_tasks` supports exact filters (`state`, `name`, `worker`, `since`), a partial
 case-insensitive `search` on the task name, `offset` for pagination, and `sort_by`
@@ -137,6 +137,7 @@ Questions you can ask your AI assistant when the MCP server is connected:
 | "How many messages are in each queue?" | `list_queues` |
 | "Shutdown worker celery@worker1" | `shutdown_worker` |
 | "Retry task abc" | `retry_task` |
+| "Run myapp.tasks.process now" | `execute_task` |
 
 ## Architecture
 
@@ -260,7 +261,7 @@ retries, and metrics. Interactive docs are available at:
 | Area | Endpoints |
 |------|-----------|
 | **Tasks** | `GET /api/tasks`, `GET /api/tasks/{id}`, `GET /api/tasks/{id}/timeline`, `GET /api/tasks/{id}/chain`, `GET /api/tasks/summary`, `GET /api/tasks/types`, `GET /api/tasks/orphaned` |
-| **Task actions** | `POST /api/tasks/{id}/revoke`, `POST /api/tasks/{id}/retry` |
+| **Task actions** | `POST /api/tasks/{id}/revoke`, `POST /api/tasks/{id}/retry`, `POST /api/tasks/execute` |
 | **Workers** | `GET /api/workers`, `GET /api/workers/list`, `GET /api/workers/{name}/stats`, `GET /api/workers/active-tasks` |
 | **Worker actions** | `POST /api/workers/{name}/shutdown`, `POST /api/workers/{name}/scale` |
 | **Queues** | `GET /api/queues` |

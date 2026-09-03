@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from taskowl.actions import retry_task, revoke_task
+from taskowl.actions import execute_task, retry_task, revoke_task
 from taskowl.auth import verify_api_key
 from taskowl.config import settings
 from taskowl.database import close_db, get_db, init_db
@@ -71,6 +71,19 @@ class TaskSummary(BaseModel):
     total_tasks: int
     by_state: dict[str, int]
     avg_runtime_seconds: float | None
+
+
+class SendTaskRequest(BaseModel):
+    """Request model for executing a task by name."""
+
+    name: str
+    args: list | None = None
+    kwargs: dict | None = None
+    queue: str | None = None
+    countdown: int | None = None
+    eta: str | None = None
+    expires: str | None = None
+    priority: int | None = None
 
 
 @app.get("/health")
@@ -239,6 +252,31 @@ async def api_retry_task(
         task_id: UUID of the task to retry
     """
     result = await retry_task(task_id, session)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/tasks/execute")
+async def api_execute_task(
+    request: SendTaskRequest,
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Execute a task by name, sending it to the Celery broker.
+
+    Args:
+        request: Task name, args, kwargs, and scheduling options
+    """
+    result = await execute_task(
+        request.name,
+        args=request.args,
+        kwargs=request.kwargs,
+        queue=request.queue,
+        countdown=request.countdown,
+        eta=request.eta,
+        expires=request.expires,
+        priority=request.priority,
+    )
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result

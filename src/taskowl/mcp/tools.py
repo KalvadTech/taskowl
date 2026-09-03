@@ -236,6 +236,57 @@ def register_tools(server: MCPServer) -> None:
             return response.json()
 
     @server.tool(
+        name="execute_task",
+        description="Execute a task by name, sending it to the Celery broker",
+    )
+    async def execute_task(
+        name: str,
+        args: list | None = None,
+        kwargs: dict | None = None,
+        queue: str | None = None,
+        countdown: int | None = None,
+        eta: str | None = None,
+        expires: str | None = None,
+        priority: int | None = None,
+    ) -> dict:
+        """Execute a task by name.
+
+        Args:
+            name: Task name (e.g. 'myapp.tasks.process')
+            args: Positional arguments for the task
+            kwargs: Keyword arguments for the task
+            queue: Queue to send the task to
+            countdown: Seconds to wait before the task runs
+            eta: ISO 8601 datetime before which the task should not run
+            expires: ISO 8601 datetime after which the task expires
+            priority: Queue priority (0-9, broker-dependent)
+        """
+        async with httpx.AsyncClient() as client:
+            payload: dict = {"name": name}
+            if args is not None:
+                payload["args"] = args
+            if kwargs is not None:
+                payload["kwargs"] = kwargs
+            if queue is not None:
+                payload["queue"] = queue
+            if countdown is not None:
+                payload["countdown"] = countdown
+            if eta is not None:
+                payload["eta"] = eta
+            if expires is not None:
+                payload["expires"] = expires
+            if priority is not None:
+                payload["priority"] = priority
+
+            response = await client.post(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/tasks/execute",
+                json=payload,
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
         name="list_workers",
         description="List all active Celery workers",
     )
