@@ -724,6 +724,53 @@ async def test_api_retry_task_wrong_state(client: AsyncClient, db_session: Async
     assert "succeeded" in data["detail"]
 
 
+@pytest.mark.asyncio
+async def test_api_execute_task_success(client: AsyncClient):
+    """Test POST /api/tasks/execute with a valid request."""
+    with patch("taskowl.actions._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_result = MagicMock()
+        mock_result.id = "task-id-123"
+        mock_app.send_task.return_value = mock_result
+        mock_get_app.return_value = mock_app
+
+        response = await client.post(
+            "/api/tasks/execute",
+            json={
+                "name": "myapp.tasks.process",
+                "args": [1, "two"],
+                "kwargs": {"key": "value"},
+                "queue": "high",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["task_id"] == "task-id-123"
+        assert data["name"] == "myapp.tasks.process"
+
+
+@pytest.mark.asyncio
+async def test_api_execute_task_empty_name(client: AsyncClient):
+    """Test POST /api/tasks/execute with an empty name."""
+    with patch("taskowl.actions._get_celery_app") as mock_get_app:
+        mock_get_app.return_value = MagicMock()
+
+        response = await client.post("/api/tasks/execute", json={"name": ""})
+        assert response.status_code == 400
+        assert "Task name is required" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_api_execute_task_invalid_eta(client: AsyncClient):
+    """Test POST /api/tasks/execute with an invalid eta."""
+    response = await client.post(
+        "/api/tasks/execute", json={"name": "myapp.tasks.process", "eta": "not-a-date"}
+    )
+    assert response.status_code == 400
+    assert "valid ISO 8601" in response.json()["detail"]
+
+
 # Worker management endpoint tests
 
 

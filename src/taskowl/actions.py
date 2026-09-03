@@ -214,3 +214,66 @@ async def retry_task(
         }
     except Exception as e:
         return {"error": f"Failed to retry task: {str(e)}"}
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    """Parse an ISO 8601 datetime string, raising ValueError on bad input."""
+    if value is None:
+        return None
+    return _ensure_utc(datetime.fromisoformat(value))
+
+
+async def execute_task(
+    name: str,
+    args: list | None = None,
+    kwargs: dict | None = None,
+    queue: str | None = None,
+    countdown: int | None = None,
+    eta: str | None = None,
+    expires: str | None = None,
+    priority: int | None = None,
+) -> dict:
+    """Execute a task by name, sending it to the Celery broker.
+
+    Args:
+        name: Task name (e.g. 'myapp.tasks.process')
+        args: Positional arguments for the task
+        kwargs: Keyword arguments for the task
+        queue: Queue to send the task to (defaults to the app default)
+        countdown: Seconds to wait before the task runs
+        eta: ISO 8601 datetime before which the task should not run
+        expires: ISO 8601 datetime after which the task expires
+        priority: Queue priority (0-9, broker-dependent)
+
+    Returns:
+        Dict with status, task_id, and name
+    """
+    if not name:
+        return {"error": "Task name is required"}
+
+    try:
+        eta_dt = _parse_iso_datetime(eta)
+        expires_dt = _parse_iso_datetime(expires)
+    except ValueError:
+        return {"error": "eta and expires must be valid ISO 8601 datetimes"}
+
+    try:
+        app = _get_celery_app()
+        result = app.send_task(
+            name,
+            args=tuple(args or []),
+            kwargs=kwargs or {},
+            queue=queue,
+            countdown=countdown,
+            eta=eta_dt,
+            expires=expires_dt,
+            priority=priority,
+        )
+        return {
+            "status": "success",
+            "message": f"Task {name} has been sent",
+            "task_id": result.id,
+            "name": name,
+        }
+    except Exception as e:
+        return {"error": f"Failed to execute task: {str(e)}"}

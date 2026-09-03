@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from taskowl.actions import retry_task, revoke_task
+from taskowl.actions import execute_task, retry_task, revoke_task
 from taskowl.models import TaskEvent, WorkerEvent
 
 
@@ -372,3 +372,91 @@ async def test_retry_orphaned_task(db_session: AsyncSession):
 
         assert result["status"] == "success"
         assert result["new_task_id"] == "new-task-id-orphan"
+
+
+@pytest.mark.asyncio
+async def test_execute_task_success():
+    """Test executing a task by name."""
+    with patch("taskowl.actions._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_result = MagicMock()
+        mock_result.id = "task-id-123"
+        mock_app.send_task.return_value = mock_result
+        mock_get_app.return_value = mock_app
+
+        result = await execute_task(
+            "myapp.tasks.process",
+            args=[1, "two"],
+            kwargs={"key": "value"},
+            queue="high",
+        )
+
+        assert result["status"] == "success"
+        assert result["task_id"] == "task-id-123"
+        assert result["name"] == "myapp.tasks.process"
+        mock_app.send_task.assert_called_once_with(
+            "myapp.tasks.process",
+            args=(1, "two"),
+            kwargs={"key": "value"},
+            queue="high",
+            countdown=None,
+            eta=None,
+            expires=None,
+            priority=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_task_defaults():
+    """Test executing a task with only a name (defaults for everything else)."""
+    with patch("taskowl.actions._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_result = MagicMock()
+        mock_result.id = "task-id-default"
+        mock_app.send_task.return_value = mock_result
+        mock_get_app.return_value = mock_app
+
+        result = await execute_task("myapp.tasks.cleanup")
+
+        assert result["status"] == "success"
+        assert result["task_id"] == "task-id-default"
+        mock_app.send_task.assert_called_once_with(
+            "myapp.tasks.cleanup",
+            args=(),
+            kwargs={},
+            queue=None,
+            countdown=None,
+            eta=None,
+            expires=None,
+            priority=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_task_empty_name():
+    """Test executing a task with an empty name."""
+    result = await execute_task("")
+    assert "error" in result
+    assert "Task name is required" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_task_invalid_eta():
+    """Test executing a task with an invalid eta."""
+    result = await execute_task("myapp.tasks.process", eta="not-a-date")
+    assert "error" in result
+    assert "valid ISO 8601" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_task_celery_error():
+    """Test executing a task when Celery raises an error."""
+    with patch("taskowl.actions._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_app.send_task.side_effect = Exception("Connection failed")
+        mock_get_app.return_value = mock_app
+
+        result = await execute_task("myapp.tasks.process")
+
+        assert "error" in result
+        assert "Failed to execute task" in result["error"]
