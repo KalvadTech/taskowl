@@ -27,6 +27,8 @@ from taskowl.queries import (
 from taskowl.queues import list_queues
 from taskowl.workers import (
     get_active_tasks,
+    get_reserved_tasks,
+    get_scheduled_tasks,
     get_worker_stats,
     list_workers,
     scale_worker_pool,
@@ -351,6 +353,32 @@ async def api_get_active_tasks(
         worker_name: Optional worker name to filter by
     """
     return await get_active_tasks(worker_name)
+
+
+@app.get("/api/workers/scheduled")
+async def api_get_scheduled_tasks(
+    worker_name: str | None = None,
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Get tasks scheduled to run (with an ETA/countdown).
+
+    Args:
+        worker_name: Optional worker name to filter by
+    """
+    return await get_scheduled_tasks(worker_name)
+
+
+@app.get("/api/workers/reserved")
+async def api_get_reserved_tasks(
+    worker_name: str | None = None,
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Get tasks reserved (prefetched but not started).
+
+    Args:
+        worker_name: Optional worker name to filter by
+    """
+    return await get_reserved_tasks(worker_name)
 
 
 @app.get("/api/queues")

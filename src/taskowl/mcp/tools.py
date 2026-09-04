@@ -380,6 +380,58 @@ def register_tools(server: MCPServer) -> None:
             return response.json()
 
     @server.tool(
+        name="get_scheduled_tasks",
+        description=(
+            "Get tasks scheduled to run (with an ETA/countdown) across all workers "
+            "or a specific worker"
+        ),
+    )
+    async def get_scheduled_tasks(worker_name: str | None = None) -> dict:
+        """Get tasks scheduled to run.
+
+        Args:
+            worker_name: Optional worker name to filter by
+        """
+        async with httpx.AsyncClient() as client:
+            params = {}
+            if worker_name:
+                params["worker_name"] = worker_name
+
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/workers/scheduled",
+                params=params,
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="get_reserved_tasks",
+        description=(
+            "Get tasks reserved (prefetched but not started) across all workers "
+            "or a specific worker"
+        ),
+    )
+    async def get_reserved_tasks(worker_name: str | None = None) -> dict:
+        """Get tasks reserved (prefetched but not started).
+
+        Args:
+            worker_name: Optional worker name to filter by
+        """
+        async with httpx.AsyncClient() as client:
+            params = {}
+            if worker_name:
+                params["worker_name"] = worker_name
+
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/workers/reserved",
+                params=params,
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
         name="list_queues",
         description="List Celery broker queues with message and consumer counts",
     )

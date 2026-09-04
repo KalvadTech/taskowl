@@ -6,6 +6,8 @@ import pytest
 
 from taskowl.workers import (
     get_active_tasks,
+    get_reserved_tasks,
+    get_scheduled_tasks,
     get_worker_stats,
     list_workers,
     scale_worker_pool,
@@ -238,3 +240,137 @@ async def test_get_active_tasks_error():
 
         assert "error" in result
         assert "Failed to get active tasks" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_scheduled_tasks_success():
+    """Test getting scheduled tasks."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.scheduled.return_value = {
+            "celery@worker1": [
+                {
+                    "eta": "2026-09-04T12:00:00",
+                    "priority": 3,
+                    "request": {"id": "task-1", "name": "myapp.tasks.task1"},
+                }
+            ]
+        }
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        result = await get_scheduled_tasks()
+
+        assert "scheduled_tasks" in result
+        assert "celery@worker1" in result["scheduled_tasks"]
+
+
+@pytest.mark.asyncio
+async def test_get_scheduled_tasks_with_worker_filter():
+    """Test getting scheduled tasks for a specific worker."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.destination.return_value = mock_inspect
+        mock_inspect.scheduled.return_value = {
+            "celery@worker1": [{"eta": "2026-09-04T12:00:00", "request": {}}]
+        }
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        result = await get_scheduled_tasks("celery@worker1")
+
+        assert "scheduled_tasks" in result
+        mock_inspect.destination.assert_called_once_with(["celery@worker1"])
+
+
+@pytest.mark.asyncio
+async def test_get_scheduled_tasks_no_tasks():
+    """Test getting scheduled tasks when none are scheduled."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.scheduled.return_value = None
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        result = await get_scheduled_tasks()
+
+        assert result == {"scheduled_tasks": {}}
+
+
+@pytest.mark.asyncio
+async def test_get_scheduled_tasks_error():
+    """Test getting scheduled tasks when an error occurs."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_get_app.side_effect = Exception("Connection failed")
+
+        result = await get_scheduled_tasks()
+
+        assert "error" in result
+        assert "Failed to get scheduled tasks" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_reserved_tasks_success():
+    """Test getting reserved tasks."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.reserved.return_value = {
+            "celery@worker1": [{"id": "task-1", "name": "myapp.tasks.task1"}]
+        }
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        result = await get_reserved_tasks()
+
+        assert "reserved_tasks" in result
+        assert "celery@worker1" in result["reserved_tasks"]
+
+
+@pytest.mark.asyncio
+async def test_get_reserved_tasks_with_worker_filter():
+    """Test getting reserved tasks for a specific worker."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.destination.return_value = mock_inspect
+        mock_inspect.reserved.return_value = {
+            "celery@worker1": [{"id": "task-1", "name": "myapp.tasks.task1"}]
+        }
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        result = await get_reserved_tasks("celery@worker1")
+
+        assert "reserved_tasks" in result
+        mock_inspect.destination.assert_called_once_with(["celery@worker1"])
+
+
+@pytest.mark.asyncio
+async def test_get_reserved_tasks_no_tasks():
+    """Test getting reserved tasks when none are reserved."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.reserved.return_value = None
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        result = await get_reserved_tasks()
+
+        assert result == {"reserved_tasks": {}}
+
+
+@pytest.mark.asyncio
+async def test_get_reserved_tasks_error():
+    """Test getting reserved tasks when an error occurs."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_get_app.side_effect = Exception("Connection failed")
+
+        result = await get_reserved_tasks()
+
+        assert "error" in result
+        assert "Failed to get reserved tasks" in result["error"]
