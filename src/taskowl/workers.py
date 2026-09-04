@@ -145,3 +145,49 @@ async def get_active_tasks(worker_name: str | None = None) -> dict:
         return {"active_tasks": active or {}}
     except Exception as e:
         return {"error": f"Failed to get active tasks: {str(e)}"}
+
+
+async def get_scheduled_tasks(worker_name: str | None = None) -> dict:
+    """Get tasks scheduled to run (with an ETA/countdown) on workers.
+
+    Args:
+        worker_name: Optional worker name to filter by
+
+    Returns:
+        Dict with scheduled tasks grouped by worker
+    """
+    try:
+        app = _get_celery_app()
+        inspect = app.control.inspect()
+
+        if worker_name:
+            inspect = inspect.destination([worker_name])
+
+        scheduled = inspect.scheduled()
+
+        return {"scheduled_tasks": scheduled or {}}
+    except Exception as e:
+        return {"error": f"Failed to get scheduled tasks: {str(e)}"}
+
+
+async def get_reserved_tasks(worker_name: str | None = None) -> dict:
+    """Get tasks reserved (prefetched but not started) on workers.
+
+    Args:
+        worker_name: Optional worker name to filter by
+
+    Returns:
+        Dict with reserved tasks grouped by worker
+    """
+    try:
+        app = _get_celery_app()
+        inspect = app.control.inspect()
+
+        if worker_name:
+            inspect = inspect.destination([worker_name])
+
+        reserved = inspect.reserved()
+
+        return {"reserved_tasks": reserved or {}}
+    except Exception as e:
+        return {"error": f"Failed to get reserved tasks: {str(e)}"}

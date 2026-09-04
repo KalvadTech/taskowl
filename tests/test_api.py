@@ -896,6 +896,82 @@ async def test_api_get_active_tasks_with_worker_filter(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_api_get_scheduled_tasks(client: AsyncClient):
+    """Test GET /api/workers/scheduled."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.scheduled.return_value = {
+            "celery@worker1": [
+                {"eta": "2026-09-04T12:00:00", "priority": 3, "request": {"id": "task-1"}}
+            ]
+        }
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        response = await client.get("/api/workers/scheduled")
+        assert response.status_code == 200
+        data = response.json()
+        assert "scheduled_tasks" in data
+
+
+@pytest.mark.asyncio
+async def test_api_get_scheduled_tasks_with_worker_filter(client: AsyncClient):
+    """Test GET /api/workers/scheduled with worker filter."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.destination.return_value = mock_inspect
+        mock_inspect.scheduled.return_value = {
+            "celery@worker1": [{"eta": "2026-09-04T12:00:00", "request": {}}]
+        }
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        response = await client.get("/api/workers/scheduled?worker_name=celery@worker1")
+        assert response.status_code == 200
+        data = response.json()
+        assert "scheduled_tasks" in data
+
+
+@pytest.mark.asyncio
+async def test_api_get_reserved_tasks(client: AsyncClient):
+    """Test GET /api/workers/reserved."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.reserved.return_value = {
+            "celery@worker1": [{"id": "task-1", "name": "myapp.tasks.task1"}]
+        }
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        response = await client.get("/api/workers/reserved")
+        assert response.status_code == 200
+        data = response.json()
+        assert "reserved_tasks" in data
+
+
+@pytest.mark.asyncio
+async def test_api_get_reserved_tasks_with_worker_filter(client: AsyncClient):
+    """Test GET /api/workers/reserved with worker filter."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_inspect = MagicMock()
+        mock_inspect.destination.return_value = mock_inspect
+        mock_inspect.reserved.return_value = {
+            "celery@worker1": [{"id": "task-1", "name": "myapp.tasks.task1"}]
+        }
+        mock_app.control.inspect.return_value = mock_inspect
+        mock_get_app.return_value = mock_app
+
+        response = await client.get("/api/workers/reserved?worker_name=celery@worker1")
+        assert response.status_code == 200
+        data = response.json()
+        assert "reserved_tasks" in data
+
+
+@pytest.mark.asyncio
 async def test_api_list_queues(client: AsyncClient):
     """Test GET /api/queues."""
     with patch("taskowl.queues._list_queues_sync") as mock_list_queues:
