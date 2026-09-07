@@ -124,6 +124,29 @@ async def scale_worker_pool(worker_name: str, delta: int) -> dict:
         return {"error": f"Failed to scale worker pool: {str(e)}"}
 
 
+async def restart_worker_pool(worker_name: str, reload: bool = False) -> dict:
+    """Restart a worker's execution pool.
+
+    Args:
+        worker_name: Name of the worker
+        reload: If True, reload modules when restarting the pool
+
+    Returns:
+        Dict with status and message
+    """
+    try:
+        app = _get_celery_app()
+        app.control.pool_restart(destination=[worker_name], reload=reload)
+
+        return {
+            "status": "success",
+            "message": f"Pool restart command sent to {worker_name}",
+            "worker": worker_name,
+        }
+    except Exception as e:
+        return {"error": f"Failed to restart worker pool: {str(e)}"}
+
+
 async def get_active_tasks(worker_name: str | None = None) -> dict:
     """Get currently executing tasks.
 

@@ -31,6 +31,7 @@ from taskowl.workers import (
     get_scheduled_tasks,
     get_worker_stats,
     list_workers,
+    restart_worker_pool,
     scale_worker_pool,
     shutdown_worker,
 )
@@ -337,6 +338,24 @@ async def api_scale_worker_pool(
         delta: Number of processes to add (positive) or remove (negative)
     """
     result = await scale_worker_pool(worker_name, delta)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/workers/{worker_name}/restart")
+async def api_restart_worker_pool(
+    worker_name: str,
+    reload: bool = False,
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Restart a worker's execution pool.
+
+    Args:
+        worker_name: Name of the worker
+        reload: If True, reload modules when restarting the pool
+    """
+    result = await restart_worker_pool(worker_name, reload)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result

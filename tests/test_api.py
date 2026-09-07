@@ -859,6 +859,52 @@ async def test_api_scale_worker_pool_zero_delta(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_api_restart_worker_pool(client: AsyncClient):
+    """Test POST /api/workers/{worker_name}/restart."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_get_app.return_value = mock_app
+
+        response = await client.post("/api/workers/celery@worker1/restart")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["worker"] == "celery@worker1"
+        mock_app.control.pool_restart.assert_called_once_with(
+            destination=["celery@worker1"], reload=False
+        )
+
+
+@pytest.mark.asyncio
+async def test_api_restart_worker_pool_reload(client: AsyncClient):
+    """Test POST /api/workers/{worker_name}/restart with reload=true."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_get_app.return_value = mock_app
+
+        response = await client.post("/api/workers/celery@worker1/restart?reload=true")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        mock_app.control.pool_restart.assert_called_once_with(
+            destination=["celery@worker1"], reload=True
+        )
+
+
+@pytest.mark.asyncio
+async def test_api_restart_worker_pool_error(client: AsyncClient):
+    """Test POST /api/workers/{worker_name}/restart on error."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_app.control.pool_restart.side_effect = Exception("Restart failed")
+        mock_get_app.return_value = mock_app
+
+        response = await client.post("/api/workers/celery@worker1/restart")
+        assert response.status_code == 400
+        assert "Restart failed" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_api_get_active_tasks(client: AsyncClient):
     """Test GET /api/workers/active-tasks."""
     with patch("taskowl.workers._get_celery_app") as mock_get_app:

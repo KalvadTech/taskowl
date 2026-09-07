@@ -10,6 +10,7 @@ from taskowl.workers import (
     get_scheduled_tasks,
     get_worker_stats,
     list_workers,
+    restart_worker_pool,
     scale_worker_pool,
     shutdown_worker,
 )
@@ -176,6 +177,51 @@ async def test_scale_worker_pool_error():
 
         assert "error" in result
         assert "Failed to scale worker pool" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_restart_worker_pool_success():
+    """Test restarting a worker pool."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_get_app.return_value = mock_app
+
+        result = await restart_worker_pool("celery@worker1")
+
+        assert result["status"] == "success"
+        assert result["worker"] == "celery@worker1"
+        mock_app.control.pool_restart.assert_called_once_with(
+            destination=["celery@worker1"], reload=False
+        )
+
+
+@pytest.mark.asyncio
+async def test_restart_worker_pool_reload():
+    """Test restarting a worker pool with reload enabled."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_get_app.return_value = mock_app
+
+        result = await restart_worker_pool("celery@worker1", reload=True)
+
+        assert result["status"] == "success"
+        mock_app.control.pool_restart.assert_called_once_with(
+            destination=["celery@worker1"], reload=True
+        )
+
+
+@pytest.mark.asyncio
+async def test_restart_worker_pool_error():
+    """Test restarting a worker pool when an error occurs."""
+    with patch("taskowl.workers._get_celery_app") as mock_get_app:
+        mock_app = MagicMock()
+        mock_app.control.pool_restart.side_effect = Exception("Restart failed")
+        mock_get_app.return_value = mock_app
+
+        result = await restart_worker_pool("celery@worker1")
+
+        assert "error" in result
+        assert "Failed to restart worker pool" in result["error"]
 
 
 @pytest.mark.asyncio
