@@ -20,13 +20,13 @@ classifiers = [
 ]
 dependencies = [
     "fastapi==0.141.1",
-    "uvicorn==0.52.1",
-    "sqlalchemy==2.0.51",
+    "uvicorn==0.52.4",
+    "sqlalchemy==2.0.52",
     "asyncpg==0.31.0",
-    "alembic==1.19.0",
+    "alembic==1.19.2",
     "celery==5.6.3",
-    "mcp==2.0.0",
-    "pydantic==2.13.4",
+    "mcp==2.1.1",
+    "pydantic==2.13.5",
     "pydantic-settings==2.15.0",
     "redis==8.1.0",
     "prometheus-client==0.26.0",
@@ -42,8 +42,8 @@ Documentation = "https://github.com/KalvadTech/taskowl"
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    "ruff==0.16.1",
-    "ty==0.0.69",
+    "ruff==0.16.6",
+    "ty==0.0.78",
     "aiosqlite==0.22.1",
 ]
 
