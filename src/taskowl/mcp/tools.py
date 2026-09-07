@@ -357,6 +357,26 @@ def register_tools(server: MCPServer) -> None:
             return response.json()
 
     @server.tool(
+        name="restart_worker_pool",
+        description="Restart a worker's execution pool (optionally reloading modules)",
+    )
+    async def restart_worker_pool(worker_name: str, reload: bool = False) -> dict:
+        """Restart a worker's execution pool.
+
+        Args:
+            worker_name: Name of the worker
+            reload: If True, reload modules when restarting the pool
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/workers/{worker_name}/restart",
+                params={"reload": reload},
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
         name="get_active_tasks",
         description="Get currently executing tasks across all workers or a specific worker",
     )
