@@ -83,3 +83,77 @@ class WorkerEvent(Base):
         Index("idx_worker_events_event_type_timestamp", "event_type", "timestamp"),
         Index("idx_worker_events_timestamp", "timestamp"),
     )
+
+
+class Automation(Base):
+    """Declarative workflow automation definition.
+
+    An automation evaluates Celery events (or runs on a schedule) and, when
+    its conditions match, fires a list of actions. It is the general
+    superset of the original env-var alerts.
+    """
+
+    __tablename__ = "automations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    # Trigger: "event" (fire on a Celery event type) or "periodic" (on a schedule)
+    trigger_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    event_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    schedule_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Conditions and actions as declarative JSON lists
+    conditions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    actions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # Safety: prevent storming
+    cooldown_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_runs_per_window: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    window_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Optional per-automation circuit breaker
+    circuit_breaker: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("idx_automations_enabled", "enabled"),
+        Index("idx_automations_trigger", "trigger_type"),
+    )
+
+
+class AutomationRun(Base):
+    """Append-only audit log of automation evaluations and fired actions."""
+
+    __tablename__ = "automation_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    automation_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    trigger: Mapped[str] = mapped_column(String(50), nullable=False)
+    matched: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    conditions_passed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    actions_fired: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("idx_automation_runs_automation_id", "automation_id"),
+        Index("idx_automation_runs_created_at", "created_at"),
+    )

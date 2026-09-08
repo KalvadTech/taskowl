@@ -114,12 +114,40 @@ If authentication is enabled (see below), send the taskowl API key as
 | **Task actions** | `revoke_task`, `retry_task`, `execute_task` |
 | **Workers** | `get_worker_status`, `list_workers`, `get_worker_stats`, `shutdown_worker`, `scale_worker_pool`, `restart_worker_pool`, `get_active_tasks`, `get_scheduled_tasks`, `get_reserved_tasks` |
 | **Queues** | `list_queues` |
+| **Automations** | `list_automations`, `create_automation`, `get_automation`, `update_automation`, `delete_automation`, `toggle_automation`, `get_automation_runs` |
 
-**Total: 20 tools**
+**Total: 27 tools**
 
 `list_tasks` supports exact filters (`state`, `name`, `worker`, `since`), a partial
 case-insensitive `search` on the task name, `offset` for pagination, and `sort_by`
 (`timestamp` [default, newest-first], `name`, `state`, `worker`).
+
+### Automations
+
+Automations are declarative **trigger → conditions → actions** definitions that will
+drive workflow automation (a superset of the env-var alerts). They are managed via the
+`/api/automations` endpoints and the `*_automation` MCP tools. Phase 1 provides the
+configuration surface (CRUD + toggle + run-history) — the evaluation engine ships in a
+later phase.
+
+```bash
+curl -X POST http://localhost:8000/api/automations \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "alert-on-failure",
+    "trigger_type": "event",
+    "event_type": "task-failed",
+    "conditions": [{"field": "name", "op": "eq", "value": "payments.charge"}],
+    "actions": [{"type": "log"}]
+  }'
+```
+
+Trigger types: `event` (with `event_type`) or `periodic` (with `schedule_seconds`).
+Conditions use `{field, op, value}` with ops `eq/neq/gt/gte/lt/lte/contains/matches/in/exists`.
+Action types: `log` (Phase 2), plus `slack_webhook`/`webhook`/`retry_task`/`execute_task`/`revoke_task`
+(Phase 3). Safety knobs (`cooldown_seconds`, `max_runs_per_window`) and `circuit_breaker`
+arrive in Phases 4–5.
 
 ## Examples
 
@@ -140,6 +168,7 @@ Questions you can ask your AI assistant when the MCP server is connected:
 | "What's scheduled to run next?" | `get_scheduled_tasks`, `get_reserved_tasks` |
 | "Retry task abc" | `retry_task` |
 | "Run myapp.tasks.process now" | `execute_task` |
+| "Create an automation that alerts on payment failures" | `create_automation` |
 
 ## Architecture
 
@@ -267,6 +296,7 @@ retries, and metrics. Interactive docs are available at:
 | **Workers** | `GET /api/workers`, `GET /api/workers/list`, `GET /api/workers/{name}/stats`, `GET /api/workers/active-tasks`, `GET /api/workers/scheduled`, `GET /api/workers/reserved` |
 | **Worker actions** | `POST /api/workers/{name}/shutdown`, `POST /api/workers/{name}/scale`, `POST /api/workers/{name}/restart` |
 | **Queues** | `GET /api/queues` |
+| **Automations** | `GET /api/automations`, `POST /api/automations`, `GET /api/automations/{id}`, `PUT /api/automations/{id}`, `DELETE /api/automations/{id}`, `POST /api/automations/{id}/toggle`, `GET /api/automations/{id}/runs` |
 | **Ops** | `GET /health`, `GET /metrics` |
 
 The `/openapi.json` schema is the authoritative reference — this README lists
