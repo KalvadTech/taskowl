@@ -124,11 +124,15 @@ case-insensitive `search` on the task name, `offset` for pagination, and `sort_b
 
 ### Automations
 
-Automations are declarative **trigger → conditions → actions** definitions that will
-drive workflow automation (a superset of the env-var alerts). They are managed via the
-`/api/automations` endpoints and the `*_automation` MCP tools. Phase 1 provides the
-configuration surface (CRUD + toggle + run-history) — the evaluation engine ships in a
-later phase.
+Automations are declarative **trigger → conditions → actions** definitions that drive
+workflow automation (a superset of the env-var alerts). They are managed via the
+`/api/automations` endpoints and the `*_automation` MCP tools.
+
+Event triggers are evaluated by the consumer process: when an enabled automation's
+`event_type` matches an incoming Celery event and all its `conditions` pass, its actions
+fire. Every evaluation is recorded in the append-only `automation_runs` log (metadata only
+— args, kwargs, results, and tracebacks are never stored), queryable via
+`GET /api/automations/{id}/runs` and the `get_automation_runs` MCP tool.
 
 ```bash
 curl -X POST http://localhost:8000/api/automations \
@@ -144,10 +148,11 @@ curl -X POST http://localhost:8000/api/automations \
 ```
 
 Trigger types: `event` (with `event_type`) or `periodic` (with `schedule_seconds`).
-Conditions use `{field, op, value}` with ops `eq/neq/gt/gte/lt/lte/contains/matches/in/exists`.
-Action types: `log` (Phase 2), plus `slack_webhook`/`webhook`/`retry_task`/`execute_task`/`revoke_task`
-(Phase 3). Safety knobs (`cooldown_seconds`, `max_runs_per_window`) and `circuit_breaker`
-arrive in Phases 4–5.
+Conditions use `{field, op, value}` against event fields (including dotted paths) with ops
+`eq/neq/gt/gte/lt/lte/contains/matches/in/exists`.
+Action types: `log` (current), plus `slack_webhook`/`webhook`/`retry_task`/`execute_task`/`revoke_task`
+(in a later phase). Safety knobs (`cooldown_seconds`, `max_runs_per_window`) and `circuit_breaker`
+arrive in later phases.
 
 ## Examples
 

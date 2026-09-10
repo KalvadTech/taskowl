@@ -21,6 +21,7 @@ from taskowl.consumer.handlers import (
     WORKER_EVENT_HANDLERS,
 )
 from taskowl.database import async_session_maker
+from taskowl.workflow import WorkflowEngine
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class CeleryEventConsumer:
         self.recv: EventReceiver | None = None
         self.alert_notifier = AlertNotifier()
         self._alert_task: asyncio.Task | None = None
+        self.workflow_engine = WorkflowEngine()
 
     def _create_handlers(self) -> dict[str, Any]:
         """Create event handler mapping for Celery receiver."""
@@ -87,6 +89,9 @@ class CeleryEventConsumer:
                 hostname = event.get("hostname")
                 if hostname:
                     self.alert_notifier.mark_online(hostname)
+
+            # Evaluate workflow automations after persistence
+            await self.workflow_engine.evaluate_event(event_type, event)
         except Exception:
             logger.exception(f"Error handling event: {event}")
 
