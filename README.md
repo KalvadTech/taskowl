@@ -150,9 +150,18 @@ curl -X POST http://localhost:8000/api/automations \
 Trigger types: `event` (with `event_type`) or `periodic` (with `schedule_seconds`).
 Conditions use `{field, op, value}` against event fields (including dotted paths) with ops
 `eq/neq/gt/gte/lt/lte/contains/matches/in/exists`.
-Action types: `log` (current), plus `slack_webhook`/`webhook`/`retry_task`/`execute_task`/`revoke_task`
-(in a later phase). Safety knobs (`cooldown_seconds`, `max_runs_per_window`) and `circuit_breaker`
-arrive in later phases.
+
+Action types:
+- `log` — write to the application log (`level`, `message`)
+- `slack_webhook` — Slack-formatted webhook (`webhook_url` or `ALERT_WEBHOOK_URL`, `text`, `fields`)
+- `webhook` — generic JSON webhook (`url`, `payload`)
+- `retry_task` — retry the event's task (`task_id` defaults to the event `uuid`)
+- `execute_task` — send a task by name (`name`, `args`, `kwargs`, `queue`, `countdown`, `eta`, `expires`, `priority`)
+- `revoke_task` — revoke the event's task (`task_id` defaults to the event `uuid`, `terminate`)
+
+Action params support `{event.field}` interpolation (e.g. `"task_id": "{event.uuid}"`).
+Safety knobs (`cooldown_seconds`, `max_runs_per_window`) and `circuit_breaker` arrive in
+later phases.
 
 ## Examples
 

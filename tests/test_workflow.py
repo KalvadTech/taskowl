@@ -1,5 +1,7 @@
 """Tests for the workflow automation evaluation engine."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -241,7 +243,7 @@ async def test_evaluate_event_unsupported_action_logged_not_fired(db_session: As
             "name": "future-action",
             "trigger_type": "event",
             "event_type": "task-failed",
-            "actions": [{"type": "slack_webhook", "webhook_url": "http://x"}],
+            "actions": [{"type": "does_not_exist"}],
         },
         session=db_session,
     )
@@ -290,3 +292,208 @@ async def test_evaluate_event_snapshot_omits_sensitive_fields(db_session: AsyncS
     assert "exception" in snapshot
     for sensitive in ("args", "kwargs", "result", "traceback"):
         assert sensitive not in snapshot
+
+
+@pytest.mark.asyncio
+async def test_interpolate_event_fields():
+    """Test {event.field} interpolation in action params."""
+    event = {"uuid": "abc-123", "name": "payments.charge", "retries": 2}
+    result = WorkflowEngine._interpolate(
+        {"task_id": "{event.uuid}", "label": "processing {event.name}"}, event
+    )
+    assert result["task_id"] == "abc-123"
+    assert result["label"] == "processing payments.charge"
+
+
+@pytest.mark.asyncio
+async def test_fire_slack_webhook(db_session: AsyncSession):
+    """Test slack_webhook action sends a payload via WebhookClient."""
+    await create_automation(
+        {
+            "name": "slack-failures",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [
+                {
+                    "type": "slack_webhook",
+                    "webhook_url": "http://hooks.test/x",
+                    "text": "A task failed",
+                    "fields": {"Task": "{event.name}", "Task ID": "{event.uuid}"},
+                }
+            ],
+        },
+        session=db_session,
+    )
+
+    with patch("taskowl.workflow.WebhookClient") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.send = AsyncMock()
+        mock_client_cls.return_value = mock_client
+
+        engine = WorkflowEngine()
+        await engine.evaluate_event(
+            "task-failed",
+            {"type": "task-failed", "name": "payments.charge", "uuid": "abc"},
+            session=db_session,
+        )
+
+    mock_client_cls.assert_called_once_with("http://hooks.test/x")
+    mock_client.send.assert_awaited_once()
+    payload = mock_client.send.call_args.args[0]
+    assert payload["text"] == "A task failed"
+    assert payload["attachments"][0]["fields"][0]["value"] == "payments.charge"
+
+
+@pytest.mark.asyncio
+async def test_fire_slack_webhook_no_url(db_session: AsyncSession):
+    """Test slack_webhook without a URL records an error."""
+    await create_automation(
+        {
+            "name": "slack-no-url",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "slack_webhook"}],
+        },
+        session=db_session,
+    )
+
+    engine = WorkflowEngine()
+    await engine.evaluate_event(
+        "task-failed", {"type": "task-failed", "name": "x"}, session=db_session
+    )
+
+    result = await db_session.execute(select(AutomationRun))
+    run = result.scalars().one()
+    assert run.actions_fired[0]["type"] == "slack_webhook"
+    assert "error" in run.actions_fired[0]
+
+
+@pytest.mark.asyncio
+async def test_fire_generic_webhook(db_session: AsyncSession):
+    """Test generic webhook action sends the payload."""
+    await create_automation(
+        {
+            "name": "generic-webhook",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [
+                {
+                    "type": "webhook",
+                    "url": "http://hooks.test/y",
+                    "payload": {"task": "{event.name}"},
+                }
+            ],
+        },
+        session=db_session,
+    )
+
+    with patch("taskowl.workflow.WebhookClient") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.send = AsyncMock()
+        mock_client_cls.return_value = mock_client
+
+        engine = WorkflowEngine()
+        await engine.evaluate_event(
+            "task-failed",
+            {"type": "task-failed", "name": "payments.charge"},
+            session=db_session,
+        )
+
+    mock_client_cls.assert_called_once_with("http://hooks.test/y")
+    mock_client.send.assert_awaited_once()
+    payload = mock_client.send.call_args.args[0]
+    assert payload["task"] == "payments.charge"
+
+
+@pytest.mark.asyncio
+async def test_fire_retry_task(db_session: AsyncSession):
+    """Test retry_task action dispatches to the actions module."""
+    await create_automation(
+        {
+            "name": "retry-failures",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "retry_task"}],
+        },
+        session=db_session,
+    )
+
+    with patch("taskowl.workflow.retry_task") as mock_retry:
+        mock_retry.return_value = {"status": "success", "new_task_id": "new-1"}
+
+        engine = WorkflowEngine()
+        await engine.evaluate_event(
+            "task-failed",
+            {"type": "task-failed", "name": "x", "uuid": "abc"},
+            session=db_session,
+        )
+
+    mock_retry.assert_awaited_once_with("abc", db_session)
+    result = await db_session.execute(select(AutomationRun))
+    run = result.scalars().one()
+    assert run.actions_fired == [{"type": "retry_task", "task_id": "abc"}]
+
+
+@pytest.mark.asyncio
+async def test_fire_execute_task(db_session: AsyncSession):
+    """Test execute_task action dispatches to the actions module."""
+    await create_automation(
+        {
+            "name": "execute-cleanup",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "execute_task", "name": "cleanup.run", "kwargs": {"x": 1}}],
+        },
+        session=db_session,
+    )
+
+    with patch("taskowl.workflow.execute_task") as mock_execute:
+        mock_execute.return_value = {"status": "success", "task_id": "new-1"}
+
+        engine = WorkflowEngine()
+        await engine.evaluate_event(
+            "task-failed", {"type": "task-failed", "name": "x", "uuid": "abc"}, session=db_session
+        )
+
+    mock_execute.assert_awaited_once_with(
+        "cleanup.run",
+        args=None,
+        kwargs={"x": 1},
+        queue=None,
+        countdown=None,
+        eta=None,
+        expires=None,
+        priority=None,
+    )
+    result = await db_session.execute(select(AutomationRun))
+    run = result.scalars().one()
+    assert run.actions_fired == [{"type": "execute_task", "task_id": "new-1"}]
+
+
+@pytest.mark.asyncio
+async def test_fire_revoke_task(db_session: AsyncSession):
+    """Test revoke_task action dispatches to the actions module."""
+    await create_automation(
+        {
+            "name": "revoke-failures",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "revoke_task"}],
+        },
+        session=db_session,
+    )
+
+    with patch("taskowl.workflow.revoke_task") as mock_revoke:
+        mock_revoke.return_value = {"status": "success"}
+
+        engine = WorkflowEngine()
+        await engine.evaluate_event(
+            "task-failed",
+            {"type": "task-failed", "name": "x", "uuid": "abc"},
+            session=db_session,
+        )
+
+    mock_revoke.assert_awaited_once_with("abc", False, db_session)
+    result = await db_session.execute(select(AutomationRun))
+    run = result.scalars().one()
+    assert run.actions_fired == [{"type": "revoke_task", "task_id": "abc"}]

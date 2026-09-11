@@ -12,7 +12,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from taskowl.actions import execute_task, retry_task, revoke_task
+from taskowl.alerting import WebhookClient
 from taskowl.automations import _serialize
+from taskowl.config import settings
 from taskowl.database import async_session_maker
 from taskowl.models import Automation, AutomationRun
 
@@ -191,9 +194,24 @@ class WorkflowEngine:
                 if action_type == "log":
                     self._fire_log(automation, event, action)
                     fired.append({"type": "log"})
+                elif action_type == "slack_webhook":
+                    await self._fire_slack_webhook(automation, event, action)
+                    fired.append({"type": "slack_webhook"})
+                elif action_type == "webhook":
+                    await self._fire_webhook(automation, event, action)
+                    fired.append({"type": "webhook"})
+                elif action_type == "retry_task":
+                    result = await self._fire_retry_task(event, action, session)
+                    fired.append({"type": "retry_task", **result})
+                elif action_type == "execute_task":
+                    result = await self._fire_execute_task(event, action)
+                    fired.append({"type": "execute_task", **result})
+                elif action_type == "revoke_task":
+                    result = await self._fire_revoke_task(event, action, session)
+                    fired.append({"type": "revoke_task", **result})
                 else:
                     logger.warning(
-                        "Unsupported action type %r for automation %s (arrives in a later phase)",
+                        "Unsupported action type %r for automation %s",
                         action_type,
                         automation.name,
                     )
@@ -203,6 +221,23 @@ class WorkflowEngine:
         return fired
 
     @staticmethod
+    def _interpolate(value: Any, event: dict) -> Any:
+        """Substitute ``{event.field}`` references in action params with event values."""
+        if isinstance(value, str):
+
+            def _sub(match: re.Match) -> str:
+                field = match.group(1)
+                resolved = _resolve_field(event, field)
+                return str(resolved) if resolved is not None else match.group(0)
+
+            return re.sub(r"\{event\.([\w.]+)\}", _sub, value)
+        if isinstance(value, list):
+            return [WorkflowEngine._interpolate(item, event) for item in value]
+        if isinstance(value, dict):
+            return {k: WorkflowEngine._interpolate(v, event) for k, v in value.items()}
+        return value
+
+    @staticmethod
     def _fire_log(automation: Automation, event: dict, action: dict) -> None:
         """Fire a 'log' action: write a message to the application log."""
         level = (action.get("level") or "info").upper()
@@ -210,3 +245,74 @@ class WorkflowEngine:
             f"Automation '{automation.name}' fired on {event.get('type')}"
         )
         logger.log(getattr(logging, level, logging.INFO), message)
+
+    @staticmethod
+    async def _fire_slack_webhook(automation: Automation, event: dict, action: dict) -> None:
+        """Fire a 'slack_webhook' action."""
+        url = action.get("webhook_url") or settings.alert_webhook_url
+        if not url:
+            raise ValueError("slack_webhook action requires webhook_url (or ALERT_WEBHOOK_URL)")
+
+        text = action.get("text") or f"Automation '{automation.name}' fired"
+        fields = [
+            {"title": key, "value": WorkflowEngine._interpolate(val, event)}
+            for key, val in (action.get("fields") or {}).items()
+        ]
+        payload = {
+            "text": text,
+            "attachments": [{"color": "warning", "fields": fields or None}],
+        }
+        await WebhookClient(url).send(payload)
+
+    @staticmethod
+    async def _fire_webhook(automation: Automation, event: dict, action: dict) -> None:
+        """Fire a generic 'webhook' action."""
+        url = action.get("url")
+        if not url:
+            raise ValueError("webhook action requires url")
+        payload = action.get("payload") or {
+            "automation": automation.name,
+            "event_type": event.get("type"),
+            "event": _safe_snapshot(event),
+        }
+        payload = WorkflowEngine._interpolate(payload, event)
+        await WebhookClient(url).send(payload)
+
+    @staticmethod
+    async def _fire_retry_task(event: dict, action: dict, session: AsyncSession) -> dict:
+        """Fire a 'retry_task' action using the event's task id."""
+        task_id = action.get("task_id") or event.get("uuid")
+        if not task_id:
+            return {"error": "no task_id available"}
+        result = await retry_task(task_id, session)
+        return {"error": result["error"]} if "error" in result else {"task_id": task_id}
+
+    @staticmethod
+    async def _fire_execute_task(event: dict, action: dict) -> dict:
+        """Fire an 'execute_task' action by name."""
+        name = action.get("name") or event.get("name")
+        if not name:
+            return {"error": "no task name available"}
+        result = await execute_task(
+            name,
+            args=action.get("args"),
+            kwargs=action.get("kwargs"),
+            queue=action.get("queue"),
+            countdown=action.get("countdown"),
+            eta=action.get("eta"),
+            expires=action.get("expires"),
+            priority=action.get("priority"),
+        )
+        if "error" in result:
+            return {"error": result["error"]}
+        return {"task_id": result.get("task_id")}
+
+    @staticmethod
+    async def _fire_revoke_task(event: dict, action: dict, session: AsyncSession) -> dict:
+        """Fire a 'revoke_task' action using the event's task id."""
+        task_id = action.get("task_id") or event.get("uuid")
+        if not task_id:
+            return {"error": "no task_id available"}
+        terminate = action.get("terminate", False)
+        result = await revoke_task(task_id, terminate, session)
+        return {"error": result["error"]} if "error" in result else {"task_id": task_id}
