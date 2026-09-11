@@ -1,5 +1,6 @@
 """Tests for the workflow automation evaluation engine."""
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -497,3 +498,126 @@ async def test_fire_revoke_task(db_session: AsyncSession):
     result = await db_session.execute(select(AutomationRun))
     run = result.scalars().one()
     assert run.actions_fired == [{"type": "revoke_task", "task_id": "abc"}]
+
+
+@pytest.mark.asyncio
+async def test_cooldown_blocks_second_fire(db_session: AsyncSession):
+    """Test cooldown_seconds prevents re-firing within the window."""
+    await create_automation(
+        {
+            "name": "cooldown-demo",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "log"}],
+            "cooldown_seconds": 60,
+        },
+        session=db_session,
+    )
+
+    engine = WorkflowEngine()
+    # First event fires
+    await engine.evaluate_event(
+        "task-failed", {"type": "task-failed", "name": "x"}, session=db_session
+    )
+    # Second event within cooldown is skipped
+    await engine.evaluate_event(
+        "task-failed", {"type": "task-failed", "name": "x"}, session=db_session
+    )
+
+    result = await db_session.execute(select(AutomationRun))
+    runs = result.scalars().all()
+    assert len(runs) == 2
+    assert runs[0].actions_fired == [{"type": "log"}]
+    assert runs[1].actions_fired is None
+    assert runs[1].details["skipped"] == "cooldown"
+
+
+@pytest.mark.asyncio
+async def test_cooldown_expires(db_session: AsyncSession):
+    """Test cooldown no longer blocks once the window has passed."""
+    from datetime import timedelta
+
+    from taskowl.models import AutomationRun as Run
+
+    await create_automation(
+        {
+            "name": "cooldown-expiry",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "log"}],
+            "cooldown_seconds": 10,
+        },
+        session=db_session,
+    )
+
+    engine = WorkflowEngine()
+    await engine.evaluate_event(
+        "task-failed", {"type": "task-failed", "name": "x"}, session=db_session
+    )
+
+    # Backdate the run so the cooldown has expired
+    run = (await db_session.execute(select(Run))).scalars().one()
+    run.created_at = datetime.now(UTC) - timedelta(seconds=30)
+    await db_session.commit()
+
+    await engine.evaluate_event(
+        "task-failed", {"type": "task-failed", "name": "x"}, session=db_session
+    )
+
+    runs = (await db_session.execute(select(Run))).scalars().all()
+    assert runs[1].actions_fired == [{"type": "log"}]
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_blocks_after_max(db_session: AsyncSession):
+    """Test max_runs_per_window blocks once the cap is reached."""
+    await create_automation(
+        {
+            "name": "rate-limit-demo",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "log"}],
+            "max_runs_per_window": 2,
+            "window_seconds": 60,
+        },
+        session=db_session,
+    )
+
+    engine = WorkflowEngine()
+    for _ in range(3):
+        await engine.evaluate_event(
+            "task-failed", {"type": "task-failed", "name": "x"}, session=db_session
+        )
+
+    result = await db_session.execute(select(AutomationRun))
+    runs = result.scalars().all()
+    assert len(runs) == 3
+    assert runs[0].actions_fired == [{"type": "log"}]
+    assert runs[1].actions_fired == [{"type": "log"}]
+    assert runs[2].actions_fired is None
+    assert runs[2].details["skipped"] == "rate_limited"
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_no_skip_within_budget(db_session: AsyncSession):
+    """Test firings within the budget are not rate-limited."""
+    await create_automation(
+        {
+            "name": "rate-budget",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "log"}],
+            "max_runs_per_window": 5,
+            "window_seconds": 60,
+        },
+        session=db_session,
+    )
+
+    engine = WorkflowEngine()
+    for _ in range(3):
+        await engine.evaluate_event(
+            "task-failed", {"type": "task-failed", "name": "x"}, session=db_session
+        )
+
+    runs = (await db_session.execute(select(AutomationRun))).scalars().all()
+    assert all(run.actions_fired == [{"type": "log"}] for run in runs)

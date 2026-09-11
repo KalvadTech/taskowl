@@ -7,9 +7,10 @@ Every evaluation is recorded in the append-only ``automation_runs`` log.
 
 import logging
 import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from taskowl.actions import execute_task, retry_task, revoke_task
@@ -152,6 +153,7 @@ class WorkflowEngine:
             )
         )
         automations = result.scalars().all()
+        now = datetime.now(UTC)
 
         for automation in automations:
             conditions = automation.conditions or []
@@ -160,8 +162,19 @@ class WorkflowEngine:
             )
 
             actions_fired = None
+            skipped = None
             if conditions_passed:
-                actions_fired = await self._dispatch_actions(automation, event, session)
+                skipped = await self._check_rate_limits(automation, now, session)
+                if skipped is None:
+                    actions_fired = await self._dispatch_actions(automation, event, session)
+
+            details: dict = {
+                "event_type": event_type,
+                "event": _safe_snapshot(event),
+                "automation": _serialize(automation),
+            }
+            if skipped is not None:
+                details["skipped"] = skipped
 
             session.add(
                 AutomationRun(
@@ -170,15 +183,72 @@ class WorkflowEngine:
                     matched=True,
                     conditions_passed=conditions_passed,
                     actions_fired=actions_fired,
-                    details={
-                        "event_type": event_type,
-                        "event": _safe_snapshot(event),
-                        "automation": _serialize(automation),
-                    },
+                    details=details,
                 )
             )
 
         await session.commit()
+
+    async def _check_rate_limits(
+        self,
+        automation: Automation,
+        now: datetime,
+        session: AsyncSession,
+    ) -> str | None:
+        """Enforce cooldown and max-runs-per-window. Returns a skip reason or None."""
+        cooldown = automation.cooldown_seconds
+        if cooldown is not None:
+            last_fire = await self._last_fire_time(automation.id, session)
+            if last_fire is not None and now - last_fire < timedelta(seconds=cooldown):
+                return "cooldown"
+
+        max_runs = automation.max_runs_per_window
+        window = automation.window_seconds
+        if max_runs is not None and window is not None:
+            fired = await self._count_fired_in_window(automation.id, window, now, session)
+            if fired >= max_runs:
+                return "rate_limited"
+
+        return None
+
+    @staticmethod
+    async def _last_fire_time(automation_id: int, session: AsyncSession) -> datetime | None:
+        """Return the timestamp of the last run that fired actions (or None)."""
+        result = await session.execute(
+            select(AutomationRun.created_at)
+            .where(
+                AutomationRun.automation_id == automation_id,
+                AutomationRun.actions_fired.isnot(None),
+            )
+            .order_by(AutomationRun.created_at.desc())
+            .limit(1)
+        )
+        ts = result.scalar_one_or_none()
+        if ts is None:
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        return ts
+
+    @staticmethod
+    async def _count_fired_in_window(
+        automation_id: int,
+        window_seconds: int,
+        now: datetime,
+        session: AsyncSession,
+    ) -> int:
+        """Count runs that fired actions within the given window."""
+        since = now - timedelta(seconds=window_seconds)
+        result = await session.execute(
+            select(func.count())
+            .select_from(AutomationRun)
+            .where(
+                AutomationRun.automation_id == automation_id,
+                AutomationRun.actions_fired.isnot(None),
+                AutomationRun.created_at >= since,
+            )
+        )
+        return result.scalar_one() or 0
 
     async def _dispatch_actions(
         self,

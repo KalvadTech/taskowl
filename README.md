@@ -160,8 +160,14 @@ Action types:
 - `revoke_task` — revoke the event's task (`task_id` defaults to the event `uuid`, `terminate`)
 
 Action params support `{event.field}` interpolation (e.g. `"task_id": "{event.uuid}"`).
-Safety knobs (`cooldown_seconds`, `max_runs_per_window`) and `circuit_breaker` arrive in
-later phases.
+
+Safety knobs prevent alert/action storms:
+- `cooldown_seconds` — after firing, wait at least this long before firing again
+- `max_runs_per_window` + `window_seconds` — fire at most `max_runs_per_window` times per `window_seconds`
+
+Skipped evaluations (cooldown or rate limit) are still recorded in `automation_runs` with a
+`details.skipped` reason (`"cooldown"` / `"rate_limited"`), keeping storm suppression auditable.
+Circuit breakers arrive in a later phase.
 
 ## Examples
 
