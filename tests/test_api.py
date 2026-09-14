@@ -1297,3 +1297,33 @@ async def test_api_list_automation_runs(client: AsyncClient, db_session: AsyncSe
     data = response.json()
     assert len(data) == 1
     assert data[0]["matched"] is True
+
+
+@pytest.mark.asyncio
+async def test_api_get_automation_status(client: AsyncClient, db_session: AsyncSession):
+    """Test GET /api/automations/{id}/status."""
+    from taskowl.models import Automation
+
+    db_session.add(
+        Automation(
+            name="status-api",
+            trigger_type="event",
+            event_type="task-failed",
+            circuit_breaker={"failure_threshold": 2, "window_seconds": 60},
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/automations/1/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "status-api"
+    assert data["circuit_state"] == "closed"
+    assert data["last_run"] is None
+
+
+@pytest.mark.asyncio
+async def test_api_get_automation_status_not_found(client: AsyncClient):
+    """Test GET /api/automations/{id}/status for a non-existent automation."""
+    response = await client.get("/api/automations/999/status")
+    assert response.status_code == 404

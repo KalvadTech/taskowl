@@ -14,11 +14,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from taskowl.actions import execute_task, retry_task, revoke_task
-from taskowl.alerting import WebhookClient
+from taskowl.alerting import WebhookClient, build_worker_offline_payload
 from taskowl.automations import _serialize
 from taskowl.config import settings
 from taskowl.database import async_session_maker
-from taskowl.models import Automation, AutomationRun
+from taskowl.models import Automation, AutomationRun, WorkerEvent
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +118,13 @@ def _safe_snapshot(event: dict) -> dict:
 
 class WorkflowEngine:
     """Evaluates Celery events against automations and records runs."""
+
+    def __init__(self) -> None:
+        self._offline_notified: set[str] = set()
+
+    def mark_online(self, hostname: str) -> None:
+        """Record that a worker is seen online, allowing future offline alerts."""
+        self._offline_notified.discard(hostname)
 
     async def evaluate_event(
         self,
@@ -389,6 +396,9 @@ class WorkflowEngine:
                 elif action_type == "revoke_task":
                     result = await self._fire_revoke_task(event, action, session)
                     fired.append({"type": "revoke_task", **result})
+                elif action_type == "check_workers_offline":
+                    result = await self._fire_check_workers_offline(action, session)
+                    fired.append({"type": "check_workers_offline", **result})
                 else:
                     logger.warning(
                         "Unsupported action type %r for automation %s",
@@ -496,3 +506,60 @@ class WorkflowEngine:
         terminate = action.get("terminate", False)
         result = await revoke_task(task_id, terminate, session)
         return {"error": result["error"]} if "error" in result else {"task_id": task_id}
+
+    async def _fire_check_workers_offline(
+        self,
+        action: dict,
+        session: AsyncSession,
+    ) -> dict:
+        """Fire a 'check_workers_offline' action: alert for stale/offline workers.
+
+        Scans worker events for workers whose heartbeat has gone stale and sends
+        a Slack webhook for each newly-offline worker (deduplicated in-memory
+        until the worker is seen online again).
+        """
+        url = action.get("webhook_url") or settings.alert_webhook_url
+        if not url:
+            return {"error": "check_workers_offline requires webhook_url (or ALERT_WEBHOOK_URL)"}
+
+        now = datetime.now(UTC)
+        offline_timeout = timedelta(seconds=settings.worker_offline_timeout_seconds)
+
+        result = await session.execute(select(WorkerEvent.hostname).distinct())
+        hostnames = [row[0] for row in result.all()]
+
+        alerted = 0
+        for hostname in hostnames:
+            if hostname in self._offline_notified:
+                continue
+            if await self._worker_stale(session, hostname, now, offline_timeout):
+                self._offline_notified.add(hostname)
+                await WebhookClient(url).send(build_worker_offline_payload(hostname))
+                alerted += 1
+
+        return {"workers_alerted": alerted}
+
+    @staticmethod
+    async def _worker_stale(
+        session: AsyncSession,
+        hostname: str,
+        now: datetime,
+        offline_timeout: timedelta,
+    ) -> bool:
+        """Check whether a worker's latest event indicates it is stale/offline."""
+        query = (
+            select(WorkerEvent)
+            .where(WorkerEvent.hostname == hostname)
+            .order_by(WorkerEvent.timestamp.desc())
+            .limit(1)
+        )
+        result = await session.execute(query)
+        event = result.scalar_one_or_none()
+        if event is None:
+            return True
+        if event.event_type == "offline":
+            return True
+        ts = event.timestamp
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        return now - ts > offline_timeout

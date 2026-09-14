@@ -637,3 +637,23 @@ def register_tools(server: MCPServer) -> None:
             )
             response.raise_for_status()
             return response.json()
+
+    @server.tool(
+        name="get_automation_status",
+        description=(
+            "Get a workflow automation's status, including circuit-breaker state and its latest run"
+        ),
+    )
+    async def get_automation_status(automation_id: int) -> dict:
+        """Get a workflow automation's status.
+
+        Args:
+            automation_id: ID of the automation
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/automations/{automation_id}/status",
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()

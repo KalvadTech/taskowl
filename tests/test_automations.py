@@ -1,5 +1,7 @@
 """Tests for workflow automation CRUD functions."""
 
+from unittest.mock import patch
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,8 +9,10 @@ from taskowl.automations import (
     create_automation,
     delete_automation,
     get_automation,
+    get_automation_status,
     list_automation_runs,
     list_automations,
+    seed_builtin_automations,
     toggle_automation,
     update_automation,
 )
@@ -252,3 +256,109 @@ async def test_list_automation_runs_no_runs(db_session: AsyncSession):
     )
     runs = await list_automation_runs(created["id"], session=db_session)
     assert runs == []
+
+
+@pytest.mark.asyncio
+async def test_seed_builtin_automations(db_session: AsyncSession):
+    """Test seeding built-in alert automations from env settings."""
+    with patch(
+        "taskowl.config.settings",
+        alert_webhook_url="http://hooks.test/x",
+        alert_on_task_failed=True,
+        alert_on_worker_offline=True,
+        alert_slow_task_seconds=30.0,
+        alert_worker_check_seconds=60,
+    ):
+        created = await seed_builtin_automations(session=db_session)
+
+    names = {a["name"] for a in created}
+    assert {
+        "alert-task-failed",
+        "alert-slow-task",
+        "alert-worker-offline",
+        "alert-worker-offline-sweep",
+    } <= names
+
+    # Idempotent: seeding again creates nothing new
+    with patch(
+        "taskowl.config.settings",
+        alert_webhook_url="http://hooks.test/x",
+        alert_on_task_failed=True,
+        alert_on_worker_offline=True,
+        alert_slow_task_seconds=30.0,
+        alert_worker_check_seconds=60,
+    ):
+        second = await seed_builtin_automations(session=db_session)
+    assert second == []
+
+
+@pytest.mark.asyncio
+async def test_seed_builtin_automations_no_webhook(db_session: AsyncSession):
+    """Test seeding does nothing without a webhook URL."""
+    with patch("taskowl.config.settings", alert_webhook_url=None):
+        created = await seed_builtin_automations(session=db_session)
+    assert created == []
+
+
+@pytest.mark.asyncio
+async def test_get_automation_status_circuit_open(db_session: AsyncSession):
+    """Test automation status reports circuit state from the latest run."""
+    created = await create_automation(
+        {
+            "name": "status-demo",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "log"}],
+            "circuit_breaker": {"failure_threshold": 2, "window_seconds": 60},
+        },
+        session=db_session,
+    )
+    db_session.add(
+        AutomationRun(
+            automation_id=created["id"],
+            trigger="task-failed",
+            matched=True,
+            actions_fired=None,
+            details={"skipped": "circuit_open"},
+        )
+    )
+    await db_session.commit()
+
+    result = await get_automation_status(created["id"], session=db_session)
+    assert result["circuit_state"] == "open"
+    assert result["last_run"]["details"]["skipped"] == "circuit_open"
+
+
+@pytest.mark.asyncio
+async def test_get_automation_status_circuit_closed(db_session: AsyncSession):
+    """Test automation status reports closed circuit without a skip."""
+    created = await create_automation(
+        {
+            "name": "status-closed",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "log"}],
+            "circuit_breaker": {"failure_threshold": 2, "window_seconds": 60},
+        },
+        session=db_session,
+    )
+    db_session.add(
+        AutomationRun(
+            automation_id=created["id"],
+            trigger="task-failed",
+            matched=True,
+            actions_fired=[{"type": "log"}],
+        )
+    )
+    await db_session.commit()
+
+    result = await get_automation_status(created["id"], session=db_session)
+    assert result["circuit_state"] == "closed"
+
+
+@pytest.mark.asyncio
+async def test_get_automation_status_not_found(db_session: AsyncSession):
+    """Test automation status for a non-existent automation."""
+    result = await get_automation_status(999, session=db_session)
+    assert "error" in result
+    assert "not found" in result["error"]

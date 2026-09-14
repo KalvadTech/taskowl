@@ -306,6 +306,50 @@ async def toggle_automation(
     return await _toggle(session)
 
 
+async def get_automation_status(
+    automation_id: int,
+    session: AsyncSession | None = None,
+) -> dict:
+    """Get an automation's status, including current circuit-breaker state.
+
+    Args:
+        automation_id: ID of the automation
+        session: Optional database session (for testing)
+
+    Returns:
+        Dict with the automation plus its latest run and circuit state
+    """
+
+    async def _get(session: AsyncSession) -> dict:
+        result = await session.execute(select(Automation).where(Automation.id == automation_id))
+        automation = result.scalar_one_or_none()
+        if automation is None:
+            return {"error": f"Automation not found: {automation_id}"}
+
+        runs = await list_automation_runs(automation_id, limit=1, session=session)
+        latest_run = runs[0] if runs else None
+
+        circuit_state = "closed"
+        circuit_config = automation.circuit_breaker
+        if (
+            circuit_config
+            and latest_run
+            and (latest_run.get("details") or {}).get("skipped") == "circuit_open"
+        ):
+            circuit_state = "open"
+
+        return {
+            **_serialize(automation),
+            "circuit_state": circuit_state,
+            "last_run": latest_run,
+        }
+
+    if session is None:
+        async with async_session_maker() as db_session:
+            return await _get(db_session)
+    return await _get(session)
+
+
 async def list_automation_runs(
     automation_id: int | None = None,
     limit: int = 50,
@@ -337,3 +381,143 @@ async def list_automation_runs(
         async with async_session_maker() as db_session:
             return await _list(db_session)
     return await _list(session)
+
+
+async def seed_builtin_automations(session: AsyncSession | None = None) -> list[dict]:
+    """Create the built-in alert automations from the legacy env-var settings.
+
+    Idempotent: only creates an automation if one with that name does not
+    already exist. Returns the list of newly created automations.
+
+    These automations replicate the legacy ``ALERT_*`` behavior (task-failed,
+    slow-task, worker-offline event, and the periodic stale-worker sweep) so
+    the engine is the single alerting mechanism.
+
+    Args:
+        session: Optional database session (for testing)
+
+    Returns:
+        List of created automation dicts
+    """
+    from taskowl.config import settings
+
+    webhook_url = settings.alert_webhook_url
+    created: list[dict] = []
+
+    async def _ensure(
+        name: str,
+        definition: dict,
+        session: AsyncSession,
+    ) -> None:
+        existing = await session.execute(select(Automation).where(Automation.name == name))
+        if existing.scalar_one_or_none() is not None:
+            return
+        automation = Automation(
+            name=name,
+            enabled=definition.get("enabled", True),
+            trigger_type=definition["trigger_type"],
+            event_type=definition.get("event_type"),
+            schedule_seconds=definition.get("schedule_seconds"),
+            conditions=definition.get("conditions"),
+            actions=definition.get("actions"),
+        )
+        session.add(automation)
+        await session.flush()
+        created.append(_serialize(automation))
+
+    async def _seed(session: AsyncSession) -> None:
+        if not webhook_url:
+            return
+
+        if settings.alert_on_task_failed:
+            await _ensure(
+                "alert-task-failed",
+                {
+                    "trigger_type": "event",
+                    "event_type": "task-failed",
+                    "conditions": [],
+                    "actions": [
+                        {
+                            "type": "slack_webhook",
+                            "webhook_url": webhook_url,
+                            "text": "Task failed",
+                            "fields": {
+                                "Task": "{event.name}",
+                                "Task ID": "{event.uuid}",
+                                "Worker": "{event.hostname}",
+                                "Error": "{event.exception}",
+                            },
+                        }
+                    ],
+                },
+                session,
+            )
+
+        if settings.alert_slow_task_seconds is not None:
+            await _ensure(
+                "alert-slow-task",
+                {
+                    "trigger_type": "event",
+                    "event_type": "task-succeeded",
+                    "conditions": [
+                        {
+                            "field": "runtime",
+                            "op": "gt",
+                            "value": settings.alert_slow_task_seconds,
+                        }
+                    ],
+                    "actions": [
+                        {
+                            "type": "slack_webhook",
+                            "webhook_url": webhook_url,
+                            "text": "Slow task detected",
+                            "fields": {
+                                "Task": "{event.name}",
+                                "Task ID": "{event.uuid}",
+                                "Runtime (s)": "{event.runtime}",
+                                "Worker": "{event.hostname}",
+                            },
+                        }
+                    ],
+                },
+                session,
+            )
+
+        if settings.alert_on_worker_offline:
+            await _ensure(
+                "alert-worker-offline",
+                {
+                    "trigger_type": "event",
+                    "event_type": "worker-offline",
+                    "conditions": [],
+                    "actions": [
+                        {
+                            "type": "slack_webhook",
+                            "webhook_url": webhook_url,
+                            "text": "Worker offline",
+                            "fields": {"Worker": "{event.hostname}"},
+                        }
+                    ],
+                },
+                session,
+            )
+            await _ensure(
+                "alert-worker-offline-sweep",
+                {
+                    "trigger_type": "periodic",
+                    "schedule_seconds": settings.alert_worker_check_seconds,
+                    "conditions": [],
+                    "actions": [{"type": "check_workers_offline", "webhook_url": webhook_url}],
+                },
+                session,
+            )
+
+        await session.commit()
+
+    if session is None:
+        async with async_session_maker() as db_session:
+            await _seed(db_session)
+    else:
+        await _seed(session)
+
+    return created

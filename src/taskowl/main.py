@@ -15,6 +15,7 @@ from taskowl.automations import (
     create_automation,
     delete_automation,
     get_automation,
+    get_automation_status,
     list_automation_runs,
     list_automations,
     toggle_automation,
@@ -537,6 +538,19 @@ async def api_list_automation_runs(
 ) -> list[dict]:
     """List run history for a workflow automation."""
     return await list_automation_runs(automation_id, limit, session)
+
+
+@app.get("/api/automations/{automation_id}/status")
+async def api_get_automation_status(
+    automation_id: int,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Get a workflow automation's status, including circuit-breaker state."""
+    result = await get_automation_status(automation_id, session)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
 
 
 # MCP server is now run separately via taskowl-mcp command

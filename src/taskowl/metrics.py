@@ -18,7 +18,7 @@ from prometheus_client import (
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from taskowl.models import TaskEvent, WorkerEvent
+from taskowl.models import AutomationRun, TaskEvent, WorkerEvent
 
 # NOTE: The /metrics endpoint is intentionally UNAUTHENTICATED so that
 # Prometheus can scrape it without sending the taskowl API key. Ensure this
@@ -61,11 +61,24 @@ async def generate_metrics(session: AsyncSession) -> bytes:
         ["worker"],
         registry=registry,
     )
+    automation_fired_total = Counter(
+        "taskowl_automation_fired_total",
+        "Number of automation runs that fired actions",
+        ["automation_id", "trigger"],
+        registry=registry,
+    )
+    automation_skipped_total = Counter(
+        "taskowl_automation_skipped_total",
+        "Number of automation runs skipped by a safety mechanism",
+        ["automation_id", "reason"],
+        registry=registry,
+    )
 
     await _populate_task_metrics(session, task_events_total, task_duration)
     await _populate_worker_metrics(
         session, worker_status, worker_active_tasks, worker_processed_total
     )
+    await _populate_automation_metrics(session, automation_fired_total, automation_skipped_total)
 
     return generate_latest(registry)
 
@@ -156,3 +169,30 @@ def _is_online(event: WorkerEvent, now: datetime, offline_timeout: timedelta) ->
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=UTC)
     return now - ts <= offline_timeout
+
+
+async def _populate_automation_metrics(
+    session: AsyncSession,
+    automation_fired_total: Counter,
+    automation_skipped_total: Counter,
+) -> None:
+    """Populate automation run metrics.
+
+    Counts runs that fired actions (per automation + trigger) and runs skipped
+    by a safety mechanism (per automation + reason). The skip reason is read
+    from the run's ``details.skipped`` JSON field; databases without native
+    JSON operators fall back to scanning recent runs in Python.
+    """
+    result = await session.execute(
+        select(
+            AutomationRun.automation_id,
+            AutomationRun.trigger,
+            AutomationRun.actions_fired,
+            AutomationRun.details,
+        ).order_by(AutomationRun.id)
+    )
+    for automation_id, trigger, actions_fired, details in result.all():
+        if actions_fired is not None:
+            automation_fired_total.labels(str(automation_id), trigger).inc()
+        elif details and details.get("skipped"):
+            automation_skipped_total.labels(str(automation_id), details["skipped"]).inc()

@@ -8,7 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from taskowl.metrics import generate_metrics
-from taskowl.models import TaskEvent, WorkerEvent
+from taskowl.models import AutomationRun, TaskEvent, WorkerEvent
 
 
 @pytest.mark.asyncio
@@ -100,6 +100,34 @@ async def test_metrics_worker_status_offline(db_session: AsyncSession):
     text = (await generate_metrics(db_session)).decode()
 
     assert 'taskowl_worker_status{worker="celery@w2"} 0.0' in text
+
+
+@pytest.mark.asyncio
+async def test_metrics_automation_runs(db_session: AsyncSession):
+    """Automation fired and skipped runs should be counted."""
+    db_session.add(
+        AutomationRun(
+            automation_id=1,
+            trigger="task-failed",
+            matched=True,
+            actions_fired=[{"type": "log"}],
+        )
+    )
+    db_session.add(
+        AutomationRun(
+            automation_id=1,
+            trigger="task-failed",
+            matched=True,
+            actions_fired=None,
+            details={"skipped": "circuit_open"},
+        )
+    )
+    await db_session.commit()
+
+    text = (await generate_metrics(db_session)).decode()
+
+    assert 'taskowl_automation_fired_total{automation_id="1",trigger="task-failed"} 1.0' in text
+    assert 'taskowl_automation_skipped_total{automation_id="1",reason="circuit_open"} 1.0' in text
 
 
 @pytest.mark.asyncio

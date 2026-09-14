@@ -114,9 +114,9 @@ If authentication is enabled (see below), send the taskowl API key as
 | **Task actions** | `revoke_task`, `retry_task`, `execute_task` |
 | **Workers** | `get_worker_status`, `list_workers`, `get_worker_stats`, `shutdown_worker`, `scale_worker_pool`, `restart_worker_pool`, `get_active_tasks`, `get_scheduled_tasks`, `get_reserved_tasks` |
 | **Queues** | `list_queues` |
-| **Automations** | `list_automations`, `create_automation`, `get_automation`, `update_automation`, `delete_automation`, `toggle_automation`, `get_automation_runs` |
+| **Automations** | `list_automations`, `create_automation`, `get_automation`, `update_automation`, `delete_automation`, `toggle_automation`, `get_automation_runs`, `get_automation_status` |
 
-**Total: 27 tools**
+**Total: 28 tools**
 
 `list_tasks` supports exact filters (`state`, `name`, `worker`, `since`), a partial
 case-insensitive `search` on the task name, `offset` for pagination, and `sort_by`
@@ -158,6 +158,8 @@ Action types:
 - `retry_task` — retry the event's task (`task_id` defaults to the event `uuid`)
 - `execute_task` — send a task by name (`name`, `args`, `kwargs`, `queue`, `countdown`, `eta`, `expires`, `priority`)
 - `revoke_task` — revoke the event's task (`task_id` defaults to the event `uuid`, `terminate`)
+- `check_workers_offline` — scan for stale/offline workers and alert (used by the
+  seeded `alert-worker-offline-sweep` periodic automation)
 
 Action params support `{event.field}` interpolation (e.g. `"task_id": "{event.uuid}"`).
 
@@ -248,6 +250,12 @@ export CELERY_BROKER_URL="redis://localhost:6379/0"              # Redis
 
 ### Alerts / Webhooks
 
+> **Deprecated in favor of Automations.** The `ALERT_*` env vars below are
+> legacy: on consumer startup they seed the equivalent built-in automations
+> (`alert-task-failed`, `alert-slow-task`, `alert-worker-offline`,
+> `alert-worker-offline-sweep`), which are then managed like any other
+> automation via the API/MCP. Prefer defining automations directly.
+
 Set `ALERT_WEBHOOK_URL` to a Slack incoming webhook to receive notifications on
 task failures, offline workers, and slow tasks. Alerting is **off by default**.
 
@@ -259,7 +267,7 @@ Conditions:
 
 - `ALERT_ON_TASK_FAILED=true` (default) — notify when a task fails
 - `ALERT_ON_WORKER_OFFLINE=true` (default) — notify when a worker goes offline
-  (via an `worker-offline` event or a stale heartbeat detected every
+  (via a `worker-offline` event or a stale heartbeat detected every
   `ALERT_WORKER_CHECK_SECONDS`)
 - `ALERT_SLOW_TASK_SECONDS=30` — notify when a succeeded task exceeds 30s
 
@@ -290,6 +298,8 @@ scrape_configs:
 | `taskowl_worker_status` | Gauge (1 = online, 0 = offline) | `worker` |
 | `taskowl_worker_active_tasks` | Gauge | `worker` |
 | `taskowl_worker_processed_total` | Counter | `worker` |
+| `taskowl_automation_fired_total` | Counter (automation runs that fired actions) | `automation_id`, `trigger` |
+| `taskowl_automation_skipped_total` | Counter (runs skipped by a safety mechanism) | `automation_id`, `reason` |
 
 > **Security**: `/metrics` is intentionally unauthenticated so Prometheus can
 > scrape it without the taskowl API key. Only expose it to trusted networks or
@@ -325,7 +335,7 @@ retries, and metrics. Interactive docs are available at:
 | **Workers** | `GET /api/workers`, `GET /api/workers/list`, `GET /api/workers/{name}/stats`, `GET /api/workers/active-tasks`, `GET /api/workers/scheduled`, `GET /api/workers/reserved` |
 | **Worker actions** | `POST /api/workers/{name}/shutdown`, `POST /api/workers/{name}/scale`, `POST /api/workers/{name}/restart` |
 | **Queues** | `GET /api/queues` |
-| **Automations** | `GET /api/automations`, `POST /api/automations`, `GET /api/automations/{id}`, `PUT /api/automations/{id}`, `DELETE /api/automations/{id}`, `POST /api/automations/{id}/toggle`, `GET /api/automations/{id}/runs` |
+| **Automations** | `GET /api/automations`, `POST /api/automations`, `GET /api/automations/{id}`, `PUT /api/automations/{id}`, `DELETE /api/automations/{id}`, `POST /api/automations/{id}/toggle`, `GET /api/automations/{id}/runs`, `GET /api/automations/{id}/status` |
 | **Ops** | `GET /health`, `GET /metrics` |
 
 The `/openapi.json` schema is the authoritative reference — this README lists

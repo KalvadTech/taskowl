@@ -773,3 +773,107 @@ async def test_periodic_automation_conditions_evaluated(db_session: AsyncSession
     assert len(runs) == 1
     assert runs[0].conditions_passed is False
     assert runs[0].actions_fired is None
+
+
+@pytest.mark.asyncio
+async def test_check_workers_offline_alerts_stale_worker(db_session: AsyncSession):
+    """Test the check_workers_offline action alerts for stale workers."""
+    from datetime import timedelta
+
+    from taskowl.models import WorkerEvent
+
+    now = datetime.now(UTC)
+    db_session.add(
+        WorkerEvent(
+            event_type="heartbeat",
+            hostname="celery@w1",
+            timestamp=now - timedelta(seconds=300),
+        )
+    )
+    db_session.add(
+        WorkerEvent(
+            event_type="heartbeat",
+            hostname="celery@w2",
+            timestamp=now,
+        )
+    )
+    await db_session.commit()
+
+    await create_automation(
+        {
+            "name": "offline-sweep",
+            "trigger_type": "periodic",
+            "schedule_seconds": 5,
+            "actions": [{"type": "check_workers_offline", "webhook_url": "http://hooks.test/z"}],
+        },
+        session=db_session,
+    )
+
+    with patch("taskowl.workflow.WebhookClient") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.send = AsyncMock()
+        mock_client_cls.return_value = mock_client
+
+        engine = WorkflowEngine()
+        await engine.evaluate_periodic(session=db_session)
+
+    # Only the stale worker is alerted
+    assert mock_client.send.await_count == 1
+    payload = mock_client.send.call_args.args[0]
+    assert payload["text"] == "⚠️ Worker offline"
+    assert "celery@w1" in payload["attachments"][0]["fields"][0]["value"]
+
+
+@pytest.mark.asyncio
+async def test_check_workers_offline_dedupes(db_session: AsyncSession):
+    """Test the check_workers_offline action dedupes until the worker recovers."""
+    from datetime import timedelta
+
+    from taskowl.models import WorkerEvent
+
+    db_session.add(
+        WorkerEvent(
+            event_type="heartbeat",
+            hostname="celery@w1",
+            timestamp=datetime.now(UTC) - timedelta(seconds=300),
+        )
+    )
+    await db_session.commit()
+
+    await create_automation(
+        {
+            "name": "offline-sweep",
+            "trigger_type": "periodic",
+            "schedule_seconds": 5,
+            "actions": [{"type": "check_workers_offline", "webhook_url": "http://hooks.test/z"}],
+        },
+        session=db_session,
+    )
+
+    engine = WorkflowEngine()
+    with patch("taskowl.workflow.WebhookClient") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.send = AsyncMock()
+        mock_client_cls.return_value = mock_client
+
+        await engine.evaluate_periodic(session=db_session)
+        await engine.evaluate_periodic(session=db_session)
+
+    assert mock_client.send.await_count == 1
+
+    # Worker recovers -> can be alerted again (backdate the last run first)
+    engine.mark_online("celery@w1")
+    from datetime import timedelta
+
+    run = (await db_session.execute(select(AutomationRun))).scalars().all()[-1]
+    run.created_at = datetime.now(UTC) - timedelta(seconds=30)
+    await db_session.commit()
+
+    with patch("taskowl.workflow.WebhookClient") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.send = AsyncMock()
+        mock_client_cls.return_value = mock_client
+
+        await engine.evaluate_periodic(session=db_session)
+
+    assert mock_client.send.await_count == 1
