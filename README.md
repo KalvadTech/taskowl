@@ -164,10 +164,18 @@ Action params support `{event.field}` interpolation (e.g. `"task_id": "{event.uu
 Safety knobs prevent alert/action storms:
 - `cooldown_seconds` — after firing, wait at least this long before firing again
 - `max_runs_per_window` + `window_seconds` — fire at most `max_runs_per_window` times per `window_seconds`
+- `circuit_breaker` — `{"failure_threshold": N, "window_seconds": W}`; skips actions
+  (`"circuit_open"`) once the automation has fired N times within W seconds, and auto-closes
+  once the window rolls past
 
-Skipped evaluations (cooldown or rate limit) are still recorded in `automation_runs` with a
-`details.skipped` reason (`"cooldown"` / `"rate_limited"`), keeping storm suppression auditable.
-Circuit breakers arrive in a later phase.
+Skipped evaluations (cooldown, rate limit, or circuit open) are still recorded in
+`automation_runs` with a `details.skipped` reason (`"cooldown"` / `"rate_limited"` /
+`"circuit_open"`), keeping storm suppression auditable.
+
+**Periodic triggers**: automations with `trigger_type: "periodic"` and `schedule_seconds`
+run on a schedule (evaluated by the consumer's periodic loop, checked every
+`AUTOMATION_CHECK_SECONDS`). Their conditions are evaluated against an empty event context,
+so they are typically used for schedule-driven actions (e.g. a heartbeat webhook).
 
 ## Examples
 
@@ -227,6 +235,7 @@ All configuration is via environment variables:
 | `ALERT_ON_WORKER_OFFLINE` | Enable worker-offline alerts | `true` | No |
 | `ALERT_SLOW_TASK_SECONDS` | Alert when a succeeded task exceeds this runtime | None | No |
 | `ALERT_WORKER_CHECK_SECONDS` | Interval for the periodic stale-worker check | `30` | No |
+| `AUTOMATION_CHECK_SECONDS` | Interval for the periodic automation evaluation loop | `5` | No |
 
 ### Brokers
 

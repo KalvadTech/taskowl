@@ -164,7 +164,9 @@ class WorkflowEngine:
             actions_fired = None
             skipped = None
             if conditions_passed:
-                skipped = await self._check_rate_limits(automation, now, session)
+                skipped = await self._check_circuit_breaker(
+                    automation, now, session
+                ) or await self._check_rate_limits(automation, now, session)
                 if skipped is None:
                     actions_fired = await self._dispatch_actions(automation, event, session)
 
@@ -188,6 +190,98 @@ class WorkflowEngine:
             )
 
         await session.commit()
+
+    async def evaluate_periodic(
+        self,
+        session: AsyncSession | None = None,
+    ) -> None:
+        """Evaluate enabled periodic automations whose schedule is due.
+
+        Args:
+            session: Optional database session (for testing)
+        """
+        if session is None:
+            async with async_session_maker() as db_session:
+                await self._evaluate_periodic(db_session)
+        else:
+            await self._evaluate_periodic(session)
+
+    async def _evaluate_periodic(self, session: AsyncSession) -> None:
+        """Internal implementation of evaluate_periodic."""
+        result = await session.execute(
+            select(Automation).where(
+                Automation.enabled.is_(True),
+                Automation.trigger_type == "periodic",
+            )
+        )
+        automations = result.scalars().all()
+        now = datetime.now(UTC)
+
+        for automation in automations:
+            schedule = automation.schedule_seconds
+            if not schedule:
+                continue
+            last_run = await self._last_run_time(automation.id, session)
+            if last_run is not None and now - last_run < timedelta(seconds=schedule):
+                continue
+
+            conditions = automation.conditions or []
+            conditions_passed = all(evaluate_condition({}, condition) for condition in conditions)
+
+            actions_fired = None
+            skipped = None
+            if conditions_passed:
+                skipped = await self._check_circuit_breaker(
+                    automation, now, session
+                ) or await self._check_rate_limits(automation, now, session)
+                if skipped is None:
+                    actions_fired = await self._dispatch_actions(automation, {}, session)
+
+            details: dict = {
+                "event_type": "periodic",
+                "event": {},
+                "automation": _serialize(automation),
+            }
+            if skipped is not None:
+                details["skipped"] = skipped
+
+            session.add(
+                AutomationRun(
+                    automation_id=automation.id,
+                    trigger="periodic",
+                    matched=True,
+                    conditions_passed=conditions_passed,
+                    actions_fired=actions_fired,
+                    details=details,
+                )
+            )
+
+        await session.commit()
+
+    async def _check_circuit_breaker(
+        self,
+        automation: Automation,
+        now: datetime,
+        session: AsyncSession,
+    ) -> str | None:
+        """Check the per-automation circuit breaker. Returns skip reason or None.
+
+        The breaker trips when the automation has fired ``failure_threshold``
+        times within ``window_seconds``. While tripped, actions are skipped
+        (``circuit_open``) until the window rolls past (auto-close).
+        """
+        config = automation.circuit_breaker
+        if not config:
+            return None
+        threshold = config.get("failure_threshold")
+        window = config.get("window_seconds")
+        if not threshold or not window:
+            return None
+
+        fired = await self._count_fired_in_window(automation.id, window, now, session)
+        if fired >= threshold:
+            return "circuit_open"
+        return None
 
     async def _check_rate_limits(
         self,
@@ -220,6 +314,22 @@ class WorkflowEngine:
                 AutomationRun.automation_id == automation_id,
                 AutomationRun.actions_fired.isnot(None),
             )
+            .order_by(AutomationRun.created_at.desc())
+            .limit(1)
+        )
+        ts = result.scalar_one_or_none()
+        if ts is None:
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        return ts
+
+    @staticmethod
+    async def _last_run_time(automation_id: int, session: AsyncSession) -> datetime | None:
+        """Return the timestamp of the last run for an automation (any run)."""
+        result = await session.execute(
+            select(AutomationRun.created_at)
+            .where(AutomationRun.automation_id == automation_id)
             .order_by(AutomationRun.created_at.desc())
             .limit(1)
         )

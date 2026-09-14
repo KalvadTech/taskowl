@@ -44,6 +44,7 @@ class CeleryEventConsumer:
         self.recv: EventReceiver | None = None
         self.alert_notifier = AlertNotifier()
         self._alert_task: asyncio.Task | None = None
+        self._automation_task: asyncio.Task | None = None
         self.workflow_engine = WorkflowEngine()
 
     def _create_handlers(self) -> dict[str, Any]:
@@ -168,14 +169,18 @@ class CeleryEventConsumer:
         # Start periodic stale-worker alert check (no-op if alerting disabled)
         self._alert_task = asyncio.create_task(self._periodic_worker_check())
 
+        # Start periodic automation evaluation loop (no-op if no periodic automations)
+        self._automation_task = asyncio.create_task(self._periodic_automation_check())
+
         # Run event capture in thread pool to avoid blocking
         await asyncio.to_thread(self._capture_events)
 
-        # Cancel periodic alert check on shutdown
-        if self._alert_task:
-            self._alert_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._alert_task
+        # Cancel periodic tasks on shutdown
+        for task in (self._alert_task, self._automation_task):
+            if task:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
         logger.info("Celery event consumer stopped")
 
@@ -187,6 +192,16 @@ class CeleryEventConsumer:
                 await self.alert_notifier.check_workers()
             except Exception:
                 logger.exception("Error in periodic worker alert check")
+            await asyncio.sleep(interval)
+
+    async def _periodic_automation_check(self) -> None:
+        """Periodically evaluate due periodic automations."""
+        interval = settings.automation_check_seconds
+        while True:
+            try:
+                await self.workflow_engine.evaluate_periodic()
+            except Exception:
+                logger.exception("Error in periodic automation check")
             await asyncio.sleep(interval)
 
     async def stop(self) -> None:

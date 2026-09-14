@@ -68,6 +68,10 @@ class Settings(BaseSettings):
         default=30,
         description="Interval for the periodic stale-worker check",
     )
+    automation_check_seconds: int = Field(
+        default=5,
+        description="Interval for the periodic automation evaluation loop",
+    )
 
     model_config = {"env_prefix": "", "case_sensitive": False}
 

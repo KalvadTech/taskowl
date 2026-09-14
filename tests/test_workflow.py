@@ -621,3 +621,155 @@ async def test_rate_limit_no_skip_within_budget(db_session: AsyncSession):
 
     runs = (await db_session.execute(select(AutomationRun))).scalars().all()
     assert all(run.actions_fired == [{"type": "log"}] for run in runs)
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_trips_after_threshold(db_session: AsyncSession):
+    """Test the circuit breaker skips actions once the failure threshold is hit."""
+    await create_automation(
+        {
+            "name": "breaker-demo",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "log"}],
+            "circuit_breaker": {"failure_threshold": 2, "window_seconds": 60},
+        },
+        session=db_session,
+    )
+
+    engine = WorkflowEngine()
+    # Fire twice (reaches threshold)
+    for _ in range(2):
+        await engine.evaluate_event(
+            "task-failed", {"type": "task-failed", "name": "x"}, session=db_session
+        )
+    # Third should be circuit_open
+    await engine.evaluate_event(
+        "task-failed", {"type": "task-failed", "name": "x"}, session=db_session
+    )
+
+    runs = (await db_session.execute(select(AutomationRun))).scalars().all()
+    assert runs[0].actions_fired == [{"type": "log"}]
+    assert runs[1].actions_fired == [{"type": "log"}]
+    assert runs[2].actions_fired is None
+    assert runs[2].details["skipped"] == "circuit_open"
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_auto_closes_after_window(db_session: AsyncSession):
+    """Test the circuit breaker reopens once the window has passed."""
+    from datetime import timedelta
+
+    from taskowl.models import AutomationRun as Run
+
+    await create_automation(
+        {
+            "name": "breaker-closes",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "actions": [{"type": "log"}],
+            "circuit_breaker": {"failure_threshold": 2, "window_seconds": 10},
+        },
+        session=db_session,
+    )
+
+    engine = WorkflowEngine()
+    for _ in range(2):
+        await engine.evaluate_event(
+            "task-failed", {"type": "task-failed", "name": "x"}, session=db_session
+        )
+
+    # Backdate the fired runs so the window has passed
+    runs = (await db_session.execute(select(Run))).scalars().all()
+    old = datetime.now(UTC) - timedelta(seconds=30)
+    for run in runs:
+        run.created_at = old
+    await db_session.commit()
+
+    await engine.evaluate_event(
+        "task-failed", {"type": "task-failed", "name": "x"}, session=db_session
+    )
+
+    runs = (await db_session.execute(select(Run))).scalars().all()
+    assert runs[2].actions_fired == [{"type": "log"}]
+
+
+@pytest.mark.asyncio
+async def test_periodic_automation_fires_on_schedule(db_session: AsyncSession):
+    """Test a periodic automation fires when its schedule is due."""
+    await create_automation(
+        {
+            "name": "heartbeat",
+            "trigger_type": "periodic",
+            "schedule_seconds": 5,
+            "actions": [{"type": "log"}],
+        },
+        session=db_session,
+    )
+
+    engine = WorkflowEngine()
+    # First evaluation: no prior run -> fires
+    await engine.evaluate_periodic(session=db_session)
+    # Second evaluation: within schedule -> not due, no run recorded
+    await engine.evaluate_periodic(session=db_session)
+
+    runs = (await db_session.execute(select(AutomationRun))).scalars().all()
+    assert len(runs) == 1
+    assert runs[0].trigger == "periodic"
+    assert runs[0].conditions_passed is True
+    assert runs[0].actions_fired == [{"type": "log"}]
+
+
+@pytest.mark.asyncio
+async def test_periodic_automation_fires_again_after_schedule(db_session: AsyncSession):
+    """Test a periodic automation fires again once the schedule has elapsed."""
+    from datetime import timedelta
+
+    from taskowl.models import AutomationRun as Run
+
+    await create_automation(
+        {
+            "name": "heartbeat-again",
+            "trigger_type": "periodic",
+            "schedule_seconds": 5,
+            "actions": [{"type": "log"}],
+        },
+        session=db_session,
+    )
+
+    engine = WorkflowEngine()
+    await engine.evaluate_periodic(session=db_session)
+
+    # Backdate the run so the schedule has elapsed
+    run = (await db_session.execute(select(Run))).scalars().one()
+    run.created_at = datetime.now(UTC) - timedelta(seconds=10)
+    await db_session.commit()
+
+    await engine.evaluate_periodic(session=db_session)
+
+    runs = (await db_session.execute(select(Run))).scalars().all()
+    assert len(runs) == 2
+    assert runs[1].actions_fired == [{"type": "log"}]
+
+
+@pytest.mark.asyncio
+async def test_periodic_automation_conditions_evaluated(db_session: AsyncSession):
+    """Test a periodic automation with failing conditions records no actions."""
+    await create_automation(
+        {
+            "name": "periodic-condition",
+            "trigger_type": "periodic",
+            "schedule_seconds": 5,
+            "conditions": [{"field": "runtime", "op": "gt", "value": 10}],
+            "actions": [{"type": "log"}],
+        },
+        session=db_session,
+    )
+
+    engine = WorkflowEngine()
+    await engine.evaluate_periodic(session=db_session)
+
+    runs = (await db_session.execute(select(AutomationRun))).scalars().all()
+    assert len(runs) == 1
+    assert runs[0].conditions_passed is False
+    assert runs[0].actions_fired is None
