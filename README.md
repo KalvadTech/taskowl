@@ -114,12 +114,70 @@ If authentication is enabled (see below), send the taskowl API key as
 | **Task actions** | `revoke_task`, `retry_task`, `execute_task` |
 | **Workers** | `get_worker_status`, `list_workers`, `get_worker_stats`, `shutdown_worker`, `scale_worker_pool`, `restart_worker_pool`, `get_active_tasks`, `get_scheduled_tasks`, `get_reserved_tasks` |
 | **Queues** | `list_queues` |
+| **Automations** | `list_automations`, `create_automation`, `get_automation`, `update_automation`, `delete_automation`, `toggle_automation`, `get_automation_runs`, `get_automation_status` |
 
-**Total: 20 tools**
+**Total: 28 tools**
 
 `list_tasks` supports exact filters (`state`, `name`, `worker`, `since`), a partial
 case-insensitive `search` on the task name, `offset` for pagination, and `sort_by`
 (`timestamp` [default, newest-first], `name`, `state`, `worker`).
+
+### Automations
+
+Automations are declarative **trigger → conditions → actions** definitions that drive
+workflow automation (a superset of the env-var alerts). They are managed via the
+`/api/automations` endpoints and the `*_automation` MCP tools.
+
+Event triggers are evaluated by the consumer process: when an enabled automation's
+`event_type` matches an incoming Celery event and all its `conditions` pass, its actions
+fire. Every evaluation is recorded in the append-only `automation_runs` log (metadata only
+— args, kwargs, results, and tracebacks are never stored), queryable via
+`GET /api/automations/{id}/runs` and the `get_automation_runs` MCP tool.
+
+```bash
+curl -X POST http://localhost:8000/api/automations \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "alert-on-failure",
+    "trigger_type": "event",
+    "event_type": "task-failed",
+    "conditions": [{"field": "name", "op": "eq", "value": "payments.charge"}],
+    "actions": [{"type": "log"}]
+  }'
+```
+
+Trigger types: `event` (with `event_type`) or `periodic` (with `schedule_seconds`).
+Conditions use `{field, op, value}` against event fields (including dotted paths) with ops
+`eq/neq/gt/gte/lt/lte/contains/matches/in/exists`.
+
+Action types:
+- `log` — write to the application log (`level`, `message`)
+- `slack_webhook` — Slack-formatted webhook (`webhook_url` or `ALERT_WEBHOOK_URL`, `text`, `fields`)
+- `webhook` — generic JSON webhook (`url`, `payload`)
+- `retry_task` — retry the event's task (`task_id` defaults to the event `uuid`)
+- `execute_task` — send a task by name (`name`, `args`, `kwargs`, `queue`, `countdown`, `eta`, `expires`, `priority`)
+- `revoke_task` — revoke the event's task (`task_id` defaults to the event `uuid`, `terminate`)
+- `check_workers_offline` — scan for stale/offline workers and alert (used by the
+  seeded `alert-worker-offline-sweep` periodic automation)
+
+Action params support `{event.field}` interpolation (e.g. `"task_id": "{event.uuid}"`).
+
+Safety knobs prevent alert/action storms:
+- `cooldown_seconds` — after firing, wait at least this long before firing again
+- `max_runs_per_window` + `window_seconds` — fire at most `max_runs_per_window` times per `window_seconds`
+- `circuit_breaker` — `{"failure_threshold": N, "window_seconds": W}`; skips actions
+  (`"circuit_open"`) once the automation has fired N times within W seconds, and auto-closes
+  once the window rolls past
+
+Skipped evaluations (cooldown, rate limit, or circuit open) are still recorded in
+`automation_runs` with a `details.skipped` reason (`"cooldown"` / `"rate_limited"` /
+`"circuit_open"`), keeping storm suppression auditable.
+
+**Periodic triggers**: automations with `trigger_type: "periodic"` and `schedule_seconds`
+run on a schedule (evaluated by the consumer's periodic loop, checked every
+`AUTOMATION_CHECK_SECONDS`). Their conditions are evaluated against an empty event context,
+so they are typically used for schedule-driven actions (e.g. a heartbeat webhook).
 
 ## Examples
 
@@ -140,6 +198,7 @@ Questions you can ask your AI assistant when the MCP server is connected:
 | "What's scheduled to run next?" | `get_scheduled_tasks`, `get_reserved_tasks` |
 | "Retry task abc" | `retry_task` |
 | "Run myapp.tasks.process now" | `execute_task` |
+| "Create an automation that alerts on payment failures" | `create_automation` |
 
 ## Architecture
 
@@ -178,6 +237,7 @@ All configuration is via environment variables:
 | `ALERT_ON_WORKER_OFFLINE` | Enable worker-offline alerts | `true` | No |
 | `ALERT_SLOW_TASK_SECONDS` | Alert when a succeeded task exceeds this runtime | None | No |
 | `ALERT_WORKER_CHECK_SECONDS` | Interval for the periodic stale-worker check | `30` | No |
+| `AUTOMATION_CHECK_SECONDS` | Interval for the periodic automation evaluation loop | `5` | No |
 
 ### Brokers
 
@@ -190,6 +250,12 @@ export CELERY_BROKER_URL="redis://localhost:6379/0"              # Redis
 
 ### Alerts / Webhooks
 
+> **Deprecated in favor of Automations.** The `ALERT_*` env vars below are
+> legacy: on consumer startup they seed the equivalent built-in automations
+> (`alert-task-failed`, `alert-slow-task`, `alert-worker-offline`,
+> `alert-worker-offline-sweep`), which are then managed like any other
+> automation via the API/MCP. Prefer defining automations directly.
+
 Set `ALERT_WEBHOOK_URL` to a Slack incoming webhook to receive notifications on
 task failures, offline workers, and slow tasks. Alerting is **off by default**.
 
@@ -201,7 +267,7 @@ Conditions:
 
 - `ALERT_ON_TASK_FAILED=true` (default) — notify when a task fails
 - `ALERT_ON_WORKER_OFFLINE=true` (default) — notify when a worker goes offline
-  (via an `worker-offline` event or a stale heartbeat detected every
+  (via a `worker-offline` event or a stale heartbeat detected every
   `ALERT_WORKER_CHECK_SECONDS`)
 - `ALERT_SLOW_TASK_SECONDS=30` — notify when a succeeded task exceeds 30s
 
@@ -232,6 +298,8 @@ scrape_configs:
 | `taskowl_worker_status` | Gauge (1 = online, 0 = offline) | `worker` |
 | `taskowl_worker_active_tasks` | Gauge | `worker` |
 | `taskowl_worker_processed_total` | Counter | `worker` |
+| `taskowl_automation_fired_total` | Counter (automation runs that fired actions) | `automation_id`, `trigger` |
+| `taskowl_automation_skipped_total` | Counter (runs skipped by a safety mechanism) | `automation_id`, `reason` |
 
 > **Security**: `/metrics` is intentionally unauthenticated so Prometheus can
 > scrape it without the taskowl API key. Only expose it to trusted networks or
@@ -267,6 +335,7 @@ retries, and metrics. Interactive docs are available at:
 | **Workers** | `GET /api/workers`, `GET /api/workers/list`, `GET /api/workers/{name}/stats`, `GET /api/workers/active-tasks`, `GET /api/workers/scheduled`, `GET /api/workers/reserved` |
 | **Worker actions** | `POST /api/workers/{name}/shutdown`, `POST /api/workers/{name}/scale`, `POST /api/workers/{name}/restart` |
 | **Queues** | `GET /api/queues` |
+| **Automations** | `GET /api/automations`, `POST /api/automations`, `GET /api/automations/{id}`, `PUT /api/automations/{id}`, `DELETE /api/automations/{id}`, `POST /api/automations/{id}/toggle`, `GET /api/automations/{id}/runs`, `GET /api/automations/{id}/status` |
 | **Ops** | `GET /health`, `GET /metrics` |
 
 The `/openapi.json` schema is the authoritative reference — this README lists

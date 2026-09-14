@@ -11,6 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from taskowl.actions import execute_task, retry_task, revoke_task
 from taskowl.auth import verify_api_key
+from taskowl.automations import (
+    create_automation,
+    delete_automation,
+    get_automation,
+    get_automation_status,
+    list_automation_runs,
+    list_automations,
+    toggle_automation,
+    update_automation,
+)
 from taskowl.config import settings
 from taskowl.database import close_db, get_db, init_db
 from taskowl.metrics import generate_metrics
@@ -408,6 +418,138 @@ async def api_list_queues(
     result = await list_queues()
     if "error" in result:
         raise HTTPException(status_code=502, detail=result["error"])
+    return result
+
+
+class AutomationCreate(BaseModel):
+    """Request model for creating an automation."""
+
+    name: str
+    enabled: bool = True
+    trigger_type: str
+    event_type: str | None = None
+    schedule_seconds: int | None = None
+    conditions: list | None = None
+    actions: list | None = None
+    cooldown_seconds: int | None = None
+    max_runs_per_window: int | None = None
+    window_seconds: int | None = None
+    circuit_breaker: dict | None = None
+
+
+class AutomationUpdate(BaseModel):
+    """Request model for updating an automation."""
+
+    name: str | None = None
+    enabled: bool | None = None
+    trigger_type: str | None = None
+    event_type: str | None = None
+    schedule_seconds: int | None = None
+    conditions: list | None = None
+    actions: list | None = None
+    cooldown_seconds: int | None = None
+    max_runs_per_window: int | None = None
+    window_seconds: int | None = None
+    circuit_breaker: dict | None = None
+
+
+@app.get("/api/automations")
+async def api_list_automations(
+    enabled: bool | None = None,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> list[dict]:
+    """List workflow automations, optionally filtered by enabled state."""
+    return await list_automations(enabled, session)
+
+
+@app.post("/api/automations")
+async def api_create_automation(
+    request: AutomationCreate,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Create a new workflow automation."""
+    result = await create_automation(request.model_dump(), session)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/api/automations/{automation_id}")
+async def api_get_automation(
+    automation_id: int,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Get a workflow automation by id."""
+    result = await get_automation(automation_id, session)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@app.put("/api/automations/{automation_id}")
+async def api_update_automation(
+    automation_id: int,
+    request: AutomationUpdate,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Update a workflow automation."""
+    result = await update_automation(automation_id, request.model_dump(), session)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.delete("/api/automations/{automation_id}")
+async def api_delete_automation(
+    automation_id: int,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Delete a workflow automation."""
+    result = await delete_automation(automation_id, session)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@app.post("/api/automations/{automation_id}/toggle")
+async def api_toggle_automation(
+    automation_id: int,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Toggle a workflow automation's enabled state."""
+    result = await toggle_automation(automation_id, session)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@app.get("/api/automations/{automation_id}/runs")
+async def api_list_automation_runs(
+    automation_id: int,
+    limit: int = 50,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> list[dict]:
+    """List run history for a workflow automation."""
+    return await list_automation_runs(automation_id, limit, session)
+
+
+@app.get("/api/automations/{automation_id}/status")
+async def api_get_automation_status(
+    automation_id: int,
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """Get a workflow automation's status, including circuit-breaker state."""
+    result = await get_automation_status(automation_id, session)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
     return result
 
 

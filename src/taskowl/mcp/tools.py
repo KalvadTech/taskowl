@@ -464,3 +464,196 @@ def register_tools(server: MCPServer) -> None:
             )
             response.raise_for_status()
             return response.json()
+
+    @server.tool(
+        name="list_automations",
+        description="List workflow automations, optionally filtered by enabled state",
+    )
+    async def list_automations(enabled: bool | None = None) -> list[dict]:
+        """List workflow automations.
+
+        Args:
+            enabled: If set, filter by enabled/disabled state
+        """
+        async with httpx.AsyncClient() as client:
+            params = {}
+            if enabled is not None:
+                params["enabled"] = enabled
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/automations",
+                params=params,
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="create_automation",
+        description=(
+            "Create a workflow automation (trigger -> conditions -> actions). "
+            "trigger_type is 'event' (with event_type) or 'periodic' (with schedule_seconds)."
+        ),
+    )
+    async def create_automation(
+        name: str,
+        trigger_type: str,
+        event_type: str | None = None,
+        schedule_seconds: int | None = None,
+        enabled: bool = True,
+        conditions: list | None = None,
+        actions: list | None = None,
+        cooldown_seconds: int | None = None,
+        max_runs_per_window: int | None = None,
+        window_seconds: int | None = None,
+        circuit_breaker: dict | None = None,
+    ) -> dict:
+        """Create a workflow automation.
+
+        Args:
+            name: Unique automation name
+            trigger_type: 'event' or 'periodic'
+            event_type: Celery event type for event triggers
+            schedule_seconds: Interval for periodic triggers
+            enabled: Whether the automation starts enabled
+            conditions: List of condition dicts {field, op, value}
+            actions: List of action dicts {type, ...params}
+            cooldown_seconds: Minimum seconds between firings
+            max_runs_per_window: Max firings per window (with window_seconds)
+            window_seconds: Window size for max_runs_per_window
+            circuit_breaker: Optional per-automation circuit breaker config
+        """
+        async with httpx.AsyncClient() as client:
+            payload = {
+                "name": name,
+                "trigger_type": trigger_type,
+                "enabled": enabled,
+                "event_type": event_type,
+                "schedule_seconds": schedule_seconds,
+                "conditions": conditions,
+                "actions": actions,
+                "cooldown_seconds": cooldown_seconds,
+                "max_runs_per_window": max_runs_per_window,
+                "window_seconds": window_seconds,
+                "circuit_breaker": circuit_breaker,
+            }
+            response = await client.post(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/automations",
+                json=payload,
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="get_automation",
+        description="Get a workflow automation by id",
+    )
+    async def get_automation(automation_id: int) -> dict:
+        """Get a workflow automation by id.
+
+        Args:
+            automation_id: ID of the automation
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/automations/{automation_id}",
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="update_automation",
+        description="Update a workflow automation by id",
+    )
+    async def update_automation(automation_id: int, **fields) -> dict:
+        """Update a workflow automation.
+
+        Args:
+            automation_id: ID of the automation
+            **fields: Fields to update (name, enabled, event_type, conditions, actions, ...)
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/automations/{automation_id}",
+                json=fields,
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="delete_automation",
+        description="Delete a workflow automation by id",
+    )
+    async def delete_automation(automation_id: int) -> dict:
+        """Delete a workflow automation.
+
+        Args:
+            automation_id: ID of the automation
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/automations/{automation_id}",
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="toggle_automation",
+        description="Toggle a workflow automation's enabled state",
+    )
+    async def toggle_automation(automation_id: int) -> dict:
+        """Toggle a workflow automation's enabled state.
+
+        Args:
+            automation_id: ID of the automation
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/automations/{automation_id}/toggle",
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="get_automation_runs",
+        description="List run history for a workflow automation",
+    )
+    async def get_automation_runs(automation_id: int, limit: int = 50) -> list[dict]:
+        """List run history for a workflow automation.
+
+        Args:
+            automation_id: ID of the automation
+            limit: Max number of runs to return (default: 50)
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/automations/{automation_id}/runs",
+                params={"limit": limit},
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @server.tool(
+        name="get_automation_status",
+        description=(
+            "Get a workflow automation's status, including circuit-breaker state and its latest run"
+        ),
+    )
+    async def get_automation_status(automation_id: int) -> dict:
+        """Get a workflow automation's status.
+
+        Args:
+            automation_id: ID of the automation
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://{settings.taskowl_host}:{settings.taskowl_port}/api/automations/{automation_id}/status",
+                headers=_get_headers(),
+            )
+            response.raise_for_status()
+            return response.json()

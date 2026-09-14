@@ -14,13 +14,14 @@ from celery import Celery
 from celery.events import EventReceiver
 from kombu import Connection
 
-from taskowl.alerting import AlertNotifier
+from taskowl.automations import seed_builtin_automations
 from taskowl.config import settings
 from taskowl.consumer.handlers import (
     TASK_EVENT_HANDLERS,
     WORKER_EVENT_HANDLERS,
 )
 from taskowl.database import async_session_maker
+from taskowl.workflow import WorkflowEngine
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,8 @@ class CeleryEventConsumer:
         self._main_loop: asyncio.AbstractEventLoop | None = None
         self.connection: Connection | None = None
         self.recv: EventReceiver | None = None
-        self.alert_notifier = AlertNotifier()
-        self._alert_task: asyncio.Task | None = None
+        self._automation_task: asyncio.Task | None = None
+        self.workflow_engine = WorkflowEngine()
 
     def _create_handlers(self) -> dict[str, Any]:
         """Create event handler mapping for Celery receiver."""
@@ -80,13 +81,15 @@ class CeleryEventConsumer:
             async with async_session_maker() as session:
                 await handler_func(event, session)
 
-            # Fire alerts after successful persistence
             event_type = event.get("type", "")
-            await self.alert_notifier.notify_event(event_type, event)
+            # Mark workers online so the offline sweep can re-alert on recovery
             if event_type in ("worker-online", "worker-heartbeat"):
                 hostname = event.get("hostname")
                 if hostname:
-                    self.alert_notifier.mark_online(hostname)
+                    self.workflow_engine.mark_online(hostname)
+
+            # Evaluate workflow automations (alerts are now automations)
+            await self.workflow_engine.evaluate_event(event_type, event)
         except Exception:
             logger.exception(f"Error handling event: {event}")
 
@@ -160,28 +163,34 @@ class CeleryEventConsumer:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, handle_signal)
 
-        # Start periodic stale-worker alert check (no-op if alerting disabled)
-        self._alert_task = asyncio.create_task(self._periodic_worker_check())
+        # Seed built-in alert automations (idempotent; no-op if alerting disabled)
+        try:
+            await seed_builtin_automations()
+        except Exception:
+            logger.exception("Failed to seed built-in automations")
+
+        # Start periodic automation evaluation loop (no-op if no periodic automations)
+        self._automation_task = asyncio.create_task(self._periodic_automation_check())
 
         # Run event capture in thread pool to avoid blocking
         await asyncio.to_thread(self._capture_events)
 
-        # Cancel periodic alert check on shutdown
-        if self._alert_task:
-            self._alert_task.cancel()
+        # Cancel periodic tasks on shutdown
+        if self._automation_task:
+            self._automation_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await self._alert_task
+                await self._automation_task
 
         logger.info("Celery event consumer stopped")
 
-    async def _periodic_worker_check(self) -> None:
-        """Periodically check for stale/offline workers and fire alerts."""
-        interval = settings.alert_worker_check_seconds
+    async def _periodic_automation_check(self) -> None:
+        """Periodically evaluate due periodic automations."""
+        interval = settings.automation_check_seconds
         while True:
             try:
-                await self.alert_notifier.check_workers()
+                await self.workflow_engine.evaluate_periodic()
             except Exception:
-                logger.exception("Error in periodic worker alert check")
+                logger.exception("Error in periodic automation check")
             await asyncio.sleep(interval)
 
     async def stop(self) -> None:

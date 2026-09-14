@@ -1173,3 +1173,157 @@ async def test_api_get_task_includes_chain_fields(client: AsyncClient, db_sessio
     assert response.status_code == 200
     data = response.json()
     assert data["root_id"] == str(task_id)
+
+
+# Automation endpoint tests
+
+
+@pytest.mark.asyncio
+async def test_api_list_automations_empty(client: AsyncClient):
+    """Test GET /api/automations with no data."""
+    response = await client.get("/api/automations")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_api_create_automation(client: AsyncClient):
+    """Test POST /api/automations."""
+    response = await client.post(
+        "/api/automations",
+        json={
+            "name": "alert-on-failure",
+            "trigger_type": "event",
+            "event_type": "task-failed",
+            "conditions": [{"field": "name", "op": "eq", "value": "payments.charge"}],
+            "actions": [{"type": "log"}],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "alert-on-failure"
+    assert data["event_type"] == "task-failed"
+
+
+@pytest.mark.asyncio
+async def test_api_create_automation_invalid(client: AsyncClient):
+    """Test POST /api/automations with an invalid trigger."""
+    response = await client.post(
+        "/api/automations",
+        json={"name": "bad", "trigger_type": "cron", "event_type": "task-failed"},
+    )
+    assert response.status_code == 400
+    assert "trigger_type" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_api_get_automation(client: AsyncClient, db_session: AsyncSession):
+    """Test GET /api/automations/{id}."""
+    from taskowl.models import Automation
+
+    db_session.add(Automation(name="getme", trigger_type="event", event_type="task-failed"))
+    await db_session.commit()
+
+    response = await client.get("/api/automations/1")
+    assert response.status_code == 200
+    assert response.json()["name"] == "getme"
+
+
+@pytest.mark.asyncio
+async def test_api_get_automation_not_found(client: AsyncClient):
+    """Test GET /api/automations/{id} for a non-existent automation."""
+    response = await client.get("/api/automations/999")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_update_automation(client: AsyncClient, db_session: AsyncSession):
+    """Test PUT /api/automations/{id}."""
+    from taskowl.models import Automation
+
+    db_session.add(Automation(name="update-me", trigger_type="event", event_type="task-failed"))
+    await db_session.commit()
+
+    response = await client.put(
+        "/api/automations/1", json={"enabled": False, "cooldown_seconds": 60}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["enabled"] is False
+    assert data["cooldown_seconds"] == 60
+
+
+@pytest.mark.asyncio
+async def test_api_delete_automation(client: AsyncClient, db_session: AsyncSession):
+    """Test DELETE /api/automations/{id}."""
+    from taskowl.models import Automation
+
+    db_session.add(Automation(name="delete-me", trigger_type="event", event_type="task-failed"))
+    await db_session.commit()
+
+    response = await client.delete("/api/automations/1")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+    response = await client.get("/api/automations")
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_api_toggle_automation(client: AsyncClient, db_session: AsyncSession):
+    """Test POST /api/automations/{id}/toggle."""
+    from taskowl.models import Automation
+
+    db_session.add(Automation(name="toggle-me", trigger_type="event", event_type="task-failed"))
+    await db_session.commit()
+
+    response = await client.post("/api/automations/1/toggle")
+    assert response.status_code == 200
+    assert response.json()["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_api_list_automation_runs(client: AsyncClient, db_session: AsyncSession):
+    """Test GET /api/automations/{id}/runs."""
+    from taskowl.models import Automation, AutomationRun
+
+    db_session.add(Automation(name="with-runs", trigger_type="event", event_type="task-failed"))
+    await db_session.commit()
+    db_session.add(AutomationRun(automation_id=1, trigger="task-failed", matched=True))
+    await db_session.commit()
+
+    response = await client.get("/api/automations/1/runs")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["matched"] is True
+
+
+@pytest.mark.asyncio
+async def test_api_get_automation_status(client: AsyncClient, db_session: AsyncSession):
+    """Test GET /api/automations/{id}/status."""
+    from taskowl.models import Automation
+
+    db_session.add(
+        Automation(
+            name="status-api",
+            trigger_type="event",
+            event_type="task-failed",
+            circuit_breaker={"failure_threshold": 2, "window_seconds": 60},
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/automations/1/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "status-api"
+    assert data["circuit_state"] == "closed"
+    assert data["last_run"] is None
+
+
+@pytest.mark.asyncio
+async def test_api_get_automation_status_not_found(client: AsyncClient):
+    """Test GET /api/automations/{id}/status for a non-existent automation."""
+    response = await client.get("/api/automations/999/status")
+    assert response.status_code == 404
