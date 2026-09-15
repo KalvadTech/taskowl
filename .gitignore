@@ -46,6 +46,9 @@ htmlcov/
 # ruff
 .ruff_cache/
 
+# Docs
+site/
+
 # Database
 *.db
 *.sqlite

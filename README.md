@@ -2,6 +2,8 @@
 
 # taskowl
 
+[![Documentation](https://img.shields.io/badge/docs-github_pages-blue)](https://kalvadtech.github.io/taskowl/)
+
 Modern Celery task monitoring with MCP integration. No UI, just data.
 
 ## Features
@@ -9,12 +11,19 @@ Modern Celery task monitoring with MCP integration. No UI, just data.
 - **MCP-first**: Query and manage tasks, workers, and queues via the Model Context Protocol
 - **Event sourcing**: Append-only event log for a complete audit trail and state reconstruction
 - **Real-time monitoring**: Capture Celery events as they happen
-- **Task actions**: Revoke, retry, and recover orphaned tasks
-- **Worker management**: List, inspect, scale, and shut down workers
-- **Alerts**: Slack-compatible webhook notifications on failures, slow tasks, and offline workers
-- **Prometheus metrics**: Scrape task and worker telemetry via `/metrics`
+- **Task actions**: Revoke, retry, recover orphaned tasks, and execute tasks by name
+- **Worker management**: List, inspect, scale, restart, and shut down workers
+- **Queue monitoring**: Per-queue message and consumer counts for any kombu broker
+- **Workflow automations**: Declarative trigger → conditions → actions engine with
+  webhooks, retry orchestration, cooldowns, rate limits, and circuit breakers
+- **Prometheus metrics**: Scrape task, worker, and automation telemetry via `/metrics`
 - **PostgreSQL backend**: Production-ready, async throughout
 - **Broker-agnostic**: RabbitMQ, LavinMQ, Redis, or any Celery/kombu broker
+
+## Documentation
+
+The full documentation lives on [GitHub Pages](https://kalvadtech.github.io/taskowl/) —
+setup, configuration, a complete usage guide, and troubleshooting.
 
 ## Quick Start
 
@@ -46,11 +55,9 @@ make consume   # Celery event consumer
 make mcp       # MCP server on :8001
 ```
 
-## Configuring your Celery app
+### Connect your Celery app
 
-taskowl listens to Celery's **events** stream, which workers emit only if
-enabled. Add this to your Celery application so taskowl can see your tasks and
-workers:
+taskowl listens to Celery's **events** stream, which workers emit only if enabled:
 
 ```python
 # celery_app.py
@@ -58,34 +65,23 @@ from celery import Celery
 
 app = Celery("myapp", broker="amqp://guest:guest@localhost:5672//")
 
-# Workers emit task/worker events (sent, received, started, succeeded, failed, ...)
 app.conf.worker_send_task_events = True
-
-# Emit a 'task-sent' event when a task is published
 app.conf.task_send_sent_event = True
-
-# How often workers send a heartbeat (default: 2s). Higher values
-# increase the worker-offline detection delay.
 app.conf.worker_heartbeat_interval = 2
 ```
 
-Alternatively, start your worker with the `-E` flag, which is equivalent to
-`worker_send_task_events = True`:
+Or start your worker with `-E`:
 
 ```bash
 celery -A myapp worker -E --loglevel=info
 ```
 
 > **Note**: If events are not enabled, taskowl simply sees nothing — no tasks,
-> no workers. Enabling events is the one integration required.
+> no workers.
 
-## Connecting MCP clients
+### Connect an MCP client
 
-The MCP server runs on `http://localhost:8001/mcp` (Streamable HTTP).
-
-### opencode
-
-Add a remote MCP server to your `opencode.json`:
+The MCP server runs on `http://localhost:8001/mcp` (Streamable HTTP). For opencode:
 
 ```json
 {
@@ -99,288 +95,6 @@ Add a remote MCP server to your `opencode.json`:
   }
 }
 ```
-
-### Other MCP clients
-
-Point your MCP client at the Streamable HTTP endpoint `http://localhost:8001/mcp`.
-If authentication is enabled (see below), send the taskowl API key as
-`Authorization: Bearer <key>` with each request.
-
-## Available tools
-
-| Category | Tools |
-|---|---|
-| **Tasks** | `list_tasks`, `get_task`, `get_task_timeline`, `get_task_chain`, `get_task_summary`, `list_task_types`, `list_orphaned_tasks` |
-| **Task actions** | `revoke_task`, `retry_task`, `execute_task` |
-| **Workers** | `get_worker_status`, `list_workers`, `get_worker_stats`, `shutdown_worker`, `scale_worker_pool`, `restart_worker_pool`, `get_active_tasks`, `get_scheduled_tasks`, `get_reserved_tasks` |
-| **Queues** | `list_queues` |
-| **Automations** | `list_automations`, `create_automation`, `get_automation`, `update_automation`, `delete_automation`, `toggle_automation`, `get_automation_runs`, `get_automation_status` |
-
-**Total: 28 tools**
-
-`list_tasks` supports exact filters (`state`, `name`, `worker`, `since`), a partial
-case-insensitive `search` on the task name, `offset` for pagination, and `sort_by`
-(`timestamp` [default, newest-first], `name`, `state`, `worker`).
-
-### Automations
-
-Automations are declarative **trigger → conditions → actions** definitions that drive
-workflow automation (a superset of the env-var alerts). They are managed via the
-`/api/automations` endpoints and the `*_automation` MCP tools.
-
-Event triggers are evaluated by the consumer process: when an enabled automation's
-`event_type` matches an incoming Celery event and all its `conditions` pass, its actions
-fire. Every evaluation is recorded in the append-only `automation_runs` log (metadata only
-— args, kwargs, results, and tracebacks are never stored), queryable via
-`GET /api/automations/{id}/runs` and the `get_automation_runs` MCP tool.
-
-```bash
-curl -X POST http://localhost:8000/api/automations \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "alert-on-failure",
-    "trigger_type": "event",
-    "event_type": "task-failed",
-    "conditions": [{"field": "name", "op": "eq", "value": "payments.charge"}],
-    "actions": [{"type": "log"}]
-  }'
-```
-
-Trigger types: `event` (with `event_type`) or `periodic` (with `schedule_seconds`).
-Conditions use `{field, op, value}` against event fields (including dotted paths) with ops
-`eq/neq/gt/gte/lt/lte/contains/matches/in/exists`.
-
-Action types:
-- `log` — write to the application log (`level`, `message`)
-- `slack_webhook` — Slack-formatted webhook (`webhook_url` or `ALERT_WEBHOOK_URL`, `text`, `fields`)
-- `webhook` — generic JSON webhook (`url`, `payload`)
-- `retry_task` — retry the event's task (`task_id` defaults to the event `uuid`)
-- `execute_task` — send a task by name (`name`, `args`, `kwargs`, `queue`, `countdown`, `eta`, `expires`, `priority`)
-- `revoke_task` — revoke the event's task (`task_id` defaults to the event `uuid`, `terminate`)
-- `check_workers_offline` — scan for stale/offline workers and alert (used by the
-  seeded `alert-worker-offline-sweep` periodic automation)
-
-Action params support `{event.field}` interpolation (e.g. `"task_id": "{event.uuid}"`).
-
-Safety knobs prevent alert/action storms:
-- `cooldown_seconds` — after firing, wait at least this long before firing again
-- `max_runs_per_window` + `window_seconds` — fire at most `max_runs_per_window` times per `window_seconds`
-- `circuit_breaker` — `{"failure_threshold": N, "window_seconds": W}`; skips actions
-  (`"circuit_open"`) once the automation has fired N times within W seconds, and auto-closes
-  once the window rolls past
-
-Skipped evaluations (cooldown, rate limit, or circuit open) are still recorded in
-`automation_runs` with a `details.skipped` reason (`"cooldown"` / `"rate_limited"` /
-`"circuit_open"`), keeping storm suppression auditable.
-
-**Periodic triggers**: automations with `trigger_type: "periodic"` and `schedule_seconds`
-run on a schedule (evaluated by the consumer's periodic loop, checked every
-`AUTOMATION_CHECK_SECONDS`). Their conditions are evaluated against an empty event context,
-so they are typically used for schedule-driven actions (e.g. a heartbeat webhook).
-
-## Examples
-
-Questions you can ask your AI assistant when the MCP server is connected:
-
-| Question | Tools used |
-|---|---|
-| "Show me failed tasks from the last hour" | `list_tasks` |
-| "Which task types are running?" | `list_task_types` |
-| "Which tasks are orphaned?" | `list_orphaned_tasks` |
-| "Show me the timeline for task abc" | `get_task_timeline` |
-| "What's the retry chain for task abc?" | `get_task_chain` |
-| "What's the task success rate in the last 30 minutes?" | `get_task_summary` |
-| "Which workers are online?" | `get_worker_status`, `list_workers` |
-| "How many messages are in each queue?" | `list_queues` |
-| "Shutdown worker celery@worker1" | `shutdown_worker` |
-| "Restart the pool on celery@worker1" | `restart_worker_pool` |
-| "What's scheduled to run next?" | `get_scheduled_tasks`, `get_reserved_tasks` |
-| "Retry task abc" | `retry_task` |
-| "Run myapp.tasks.process now" | `execute_task` |
-| "Create an automation that alerts on payment failures" | `create_automation` |
-
-## Architecture
-
-```
-Celery workers ──events──▶ Broker ──▶ taskowl consumer ──▶ PostgreSQL
-                                                              │
-                         REST API ◀───────────────────────────┘
-                              ▲
-                              │ HTTP
-                         MCP server ──▶ LLM / MCP client
-```
-
-- **Consumer** (separate process) captures Celery events and appends them to
-  PostgreSQL (`task_events`, `worker_events`).
-- **REST API** serves queries and actions over the event-sourcing tables.
-- **MCP server** is a thin wrapper that calls the REST API for LLM access.
-
-## Configuration
-
-All configuration is via environment variables:
-
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://localhost:5432/taskowl` | Yes |
-| `CELERY_BROKER_URL` | Celery broker URL (RabbitMQ, Redis, etc.) | `amqp://guest:guest@localhost:5672//` | Yes |
-| `TASKOWL_HOST` | FastAPI server host | `0.0.0.0` | No |
-| `TASKOWL_PORT` | FastAPI server port | `8000` | No |
-| `MCP_HOST` | MCP server host | `0.0.0.0` | No |
-| `MCP_PORT` | MCP server port | `8001` | No |
-| `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` | No |
-| `API_KEY` | API key for authentication (optional) | None (disabled) | No |
-| `ORPHAN_GRACE_SECONDS` | Wait after task started before flagging as orphan | `60` | No |
-| `WORKER_OFFLINE_TIMEOUT_SECONDS` | No heartbeat for this long means worker is offline | `30` | No |
-| `ALERT_WEBHOOK_URL` | Slack webhook URL to post alerts to (disabled if unset) | None | No |
-| `ALERT_ON_TASK_FAILED` | Enable task-failed alerts | `true` | No |
-| `ALERT_ON_WORKER_OFFLINE` | Enable worker-offline alerts | `true` | No |
-| `ALERT_SLOW_TASK_SECONDS` | Alert when a succeeded task exceeds this runtime | None | No |
-| `ALERT_WORKER_CHECK_SECONDS` | Interval for the periodic stale-worker check | `30` | No |
-| `AUTOMATION_CHECK_SECONDS` | Interval for the periodic automation evaluation loop | `5` | No |
-
-### Brokers
-
-taskowl works with any Celery/kombu broker via `CELERY_BROKER_URL`:
-
-```bash
-export CELERY_BROKER_URL="amqp://guest:guest@localhost:5672//"   # RabbitMQ / LavinMQ
-export CELERY_BROKER_URL="redis://localhost:6379/0"              # Redis
-```
-
-### Alerts / Webhooks
-
-> **Deprecated in favor of Automations.** The `ALERT_*` env vars below are
-> legacy: on consumer startup they seed the equivalent built-in automations
-> (`alert-task-failed`, `alert-slow-task`, `alert-worker-offline`,
-> `alert-worker-offline-sweep`), which are then managed like any other
-> automation via the API/MCP. Prefer defining automations directly.
-
-Set `ALERT_WEBHOOK_URL` to a Slack incoming webhook to receive notifications on
-task failures, offline workers, and slow tasks. Alerting is **off by default**.
-
-```bash
-export ALERT_WEBHOOK_URL="https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
-```
-
-Conditions:
-
-- `ALERT_ON_TASK_FAILED=true` (default) — notify when a task fails
-- `ALERT_ON_WORKER_OFFLINE=true` (default) — notify when a worker goes offline
-  (via a `worker-offline` event or a stale heartbeat detected every
-  `ALERT_WORKER_CHECK_SECONDS`)
-- `ALERT_SLOW_TASK_SECONDS=30` — notify when a succeeded task exceeds 30s
-
-Payloads are Slack-formatted and contain task metadata only (name, task ID,
-worker, error, runtime) — args, kwargs, and results are never sent.
-
-### Prometheus Metrics
-
-Scrape task and worker telemetry from the API server:
-
-```bash
-curl http://localhost:8000/metrics
-```
-
-```yaml
-scrape_configs:
-  - job_name: taskowl
-    metrics_path: /metrics
-    scrape_interval: 15s
-    static_configs:
-      - targets: ["localhost:8000"]
-```
-
-| Metric | Type | Labels |
-|--------|------|--------|
-| `taskowl_task_events_total` | Counter | `event_type`, `task_name`, `worker` |
-| `taskowl_task_execution_duration_seconds` | Histogram | `task_name` |
-| `taskowl_worker_status` | Gauge (1 = online, 0 = offline) | `worker` |
-| `taskowl_worker_active_tasks` | Gauge | `worker` |
-| `taskowl_worker_processed_total` | Counter | `worker` |
-| `taskowl_automation_fired_total` | Counter (automation runs that fired actions) | `automation_id`, `trigger` |
-| `taskowl_automation_skipped_total` | Counter (runs skipped by a safety mechanism) | `automation_id`, `reason` |
-
-> **Security**: `/metrics` is intentionally unauthenticated so Prometheus can
-> scrape it without the taskowl API key. Only expose it to trusted networks or
-> behind a reverse proxy.
-
-## Authentication
-
-Optional API key authentication protects the REST API and MCP server. Set
-`API_KEY` to enable it; all requests must then include
-`Authorization: Bearer <key>`.
-
-```bash
-export API_KEY="your-secret-key-here"
-curl -H "Authorization: Bearer your-secret-key-here" http://localhost:8000/api/tasks
-```
-
-When authentication is disabled, all endpoints are open. `/health`, `/`, and
-`/metrics` remain open regardless.
-
-## REST API
-
-The API server (port 8000) exposes a REST API for tasks, workers, orphans,
-retries, and metrics. Interactive docs are available at:
-
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
-- Raw OpenAPI schema: `http://localhost:8000/openapi.json`
-
-| Area | Endpoints |
-|------|-----------|
-| **Tasks** | `GET /api/tasks`, `GET /api/tasks/{id}`, `GET /api/tasks/{id}/timeline`, `GET /api/tasks/{id}/chain`, `GET /api/tasks/summary`, `GET /api/tasks/types`, `GET /api/tasks/orphaned` |
-| **Task actions** | `POST /api/tasks/{id}/revoke`, `POST /api/tasks/{id}/retry`, `POST /api/tasks/execute` |
-| **Workers** | `GET /api/workers`, `GET /api/workers/list`, `GET /api/workers/{name}/stats`, `GET /api/workers/active-tasks`, `GET /api/workers/scheduled`, `GET /api/workers/reserved` |
-| **Worker actions** | `POST /api/workers/{name}/shutdown`, `POST /api/workers/{name}/scale`, `POST /api/workers/{name}/restart` |
-| **Queues** | `GET /api/queues` |
-| **Automations** | `GET /api/automations`, `POST /api/automations`, `GET /api/automations/{id}`, `PUT /api/automations/{id}`, `DELETE /api/automations/{id}`, `POST /api/automations/{id}/toggle`, `GET /api/automations/{id}/runs`, `GET /api/automations/{id}/status` |
-| **Ops** | `GET /health`, `GET /metrics` |
-
-The `/openapi.json` schema is the authoritative reference — this README lists
-only endpoint groups.
-
-## Troubleshooting
-
-### Worker not appearing / no events in the database
-
-1. Verify workers emit events — start with `-E` or set `worker_send_task_events`.
-2. Check the consumer connected:
-   ```bash
-   make consume 2>&1 | grep "Connected to Celery broker"
-   ```
-3. Verify events reach the broker:
-   ```bash
-   celery -A your_app events --dump
-   ```
-4. Check event counts in the database:
-   ```sql
-   SELECT COUNT(*) FROM task_events;
-   SELECT COUNT(*) FROM worker_events;
-   ```
-
-### Database connection errors
-
-- `pg_isready` to confirm PostgreSQL is up.
-- Check `DATABASE_URL` format: `postgresql+asyncpg://user:pass@host:port/dbname`.
-- Verify the role has access to the database.
-
-### Broker connection errors
-
-- `rabbitmqctl status` (or your broker's health check) to confirm it's running.
-- Check `CELERY_BROKER_URL` format and credentials.
-
-### Port already in use
-
-- API: `lsof -i :8000` / MCP: `lsof -i :8001`
-- Kill the offending process: `kill $(lsof -t -i :8001)`
-
-### Getting help
-
-Open an issue with the error message, environment details, steps to reproduce,
-and relevant (sanitized) logs:
-https://github.com/KalvadTech/taskowl/issues
 
 ## Contributing
 

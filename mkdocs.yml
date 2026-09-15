@@ -1,0 +1,64 @@
+site_name: taskowl
+site_description: Modern Celery task monitoring with MCP integration
+site_url: https://kalvadtech.github.io/taskowl/
+repo_url: https://github.com/KalvadTech/taskowl
+edit_uri: edit/main/docs/
+theme:
+  name: material
+  logo: logo.png
+  favicon: logo.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+nav:
+  - Overview: index.md
+  - Setup:
+      - setup/index.md
+      - Installation: setup/installation.md
+      - Configuration: setup/configuration.md
+  - Usage Guide:
+      - usage/index.md
+      - Configuring Celery: usage/celery-app.md
+      - MCP Clients: usage/mcp-clients.md
+      - Tasks: usage/tasks.md
+      - Task Actions: usage/task-actions.md
+      - Workers: usage/workers.md
+      - Queues: usage/queues.md
+      - Automations: usage/automations.md
+      - Metrics: usage/metrics.md
+  - Troubleshooting: troubleshooting.md
+  - Contributing: contributing.md
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/KalvadTech/taskowl
+copyright: Copyright &copy; 2026 Kalvad

@@ -1,4 +1,4 @@
-.PHONY: help install api consume mcp test lint lint-fix typecheck check migrate migrate-create clean
+.PHONY: help install api consume mcp test lint lint-fix typecheck check migrate migrate-create docs docs-serve clean
 
 help: ## Show this help message
 	@echo "Available commands:"
@@ -37,6 +37,12 @@ migrate: ## Run database migrations
 
 migrate-create: ## Create new migration (usage: make migrate-create MSG="description")
 	uv run alembic revision --autogenerate -m "$(MSG)"
+
+docs: ## Build the documentation site
+	uv run mkdocs build
+
+docs-serve: ## Serve documentation locally (http://localhost:9000)
+	uv run mkdocs serve -a localhost:9000
 
 clean: ## Remove caches and build artifacts
 	find . -type d -name "__pycache__" -exec rm -rf {} +
