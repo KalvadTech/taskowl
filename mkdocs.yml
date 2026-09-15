@@ -31,12 +31,12 @@ theme:
     - content.tabs.link
 nav:
   - Overview: index.md
-  - Setup:
-      - setup/index.md
+  - Getting Started:
+      - Setup: setup/index.md
       - Installation: setup/installation.md
       - Configuration: setup/configuration.md
-  - Usage Guide:
-      - usage/index.md
+  - User Guide:
+      - Usage Guide: usage/index.md
       - Configuring Celery: usage/celery-app.md
       - MCP Clients: usage/mcp-clients.md
       - Tasks: usage/tasks.md
