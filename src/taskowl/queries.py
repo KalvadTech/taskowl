@@ -9,10 +9,38 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.sql.elements import Over
 
 from taskowl.config import settings
 from taskowl.database import async_session_maker
 from taskowl.models import TaskEvent, WorkerEvent
+
+
+def _latest_rank(partition_col: InstrumentedAttribute, order_col: InstrumentedAttribute) -> Over:
+    """Rank rows newest-first within a partition, tie-broken by id.
+
+    Using ROW_NUMBER (rather than a MAX(timestamp) self-join) avoids
+    duplicating rows when two events share the same timestamp, and lets a
+    single index-ordered scan produce the latest row per partition.
+    """
+    return func.row_number().over(
+        partition_by=partition_col,
+        order_by=[order_col.desc(), TaskEvent.id.desc()],
+    )
+
+
+def _earliest_name_expr() -> Over:
+    """Resolve a task's earliest non-null name in a single window scan.
+
+    Ordering null names last and timestamps ascending means FIRST_VALUE picks
+    the name from the earliest event that actually carries one (names only
+    appear on sent/received events).
+    """
+    return func.first_value(TaskEvent.name).over(
+        partition_by=TaskEvent.task_id,
+        order_by=[TaskEvent.name.is_(None).asc(), TaskEvent.timestamp.asc()],
+    )
 
 
 async def list_tasks_query(
@@ -64,73 +92,42 @@ async def _list_tasks_impl(
     sort_by: str,
 ) -> list[dict] | dict:
     """Internal implementation of list_tasks_query."""
-    # This approach works with both PostgreSQL and SQLite
-    from sqlalchemy import func as sql_func
+    # Single scan: rank events newest-first per task and resolve the earliest
+    # non-null name with FIRST_VALUE. Works on PostgreSQL and SQLite.
+    latest_rn = _latest_rank(TaskEvent.task_id, TaskEvent.timestamp).label("latest_rn")
+    task_name = _earliest_name_expr().label("task_name")
 
-    # Subquery to get max timestamp per task (latest event)
-    max_timestamps = (
-        select(
-            TaskEvent.task_id,
-            sql_func.max(TaskEvent.timestamp).label("max_ts"),
-        )
-        .group_by(TaskEvent.task_id)
-        .subquery()
-    )
+    windowed = select(
+        TaskEvent.task_id.label("task_id"),
+        TaskEvent.event_type.label("event_type"),
+        TaskEvent.hostname.label("hostname"),
+        TaskEvent.queue.label("queue"),
+        TaskEvent.timestamp.label("timestamp"),
+        latest_rn,
+        task_name,
+    ).subquery()
 
-    # Subquery to get the earliest event that carries a name, per task
-    earliest_named_ts = (
-        select(
-            TaskEvent.task_id,
-            sql_func.min(TaskEvent.timestamp).label("name_ts"),
-        )
-        .where(TaskEvent.name.isnot(None))
-        .group_by(TaskEvent.task_id)
-        .subquery()
-    )
-    task_names = (
-        select(TaskEvent.task_id, TaskEvent.name)
-        .join(
-            earliest_named_ts,
-            (TaskEvent.task_id == earliest_named_ts.c.task_id)
-            & (TaskEvent.timestamp == earliest_named_ts.c.name_ts),
-        )
-        .subquery()
-    )
+    query = select(windowed).where(windowed.c.latest_rn == 1)
 
-    # Main query to get the full event records
-    query = (
-        select(TaskEvent, task_names.c.name.label("task_name"))
-        .join(
-            max_timestamps,
-            (TaskEvent.task_id == max_timestamps.c.task_id)
-            & (TaskEvent.timestamp == max_timestamps.c.max_ts),
-        )
-        .join(
-            task_names,
-            TaskEvent.task_id == task_names.c.task_id,
-            isouter=True,
-        )
-    )
-
-    # Apply filters
+    # Apply filters (against the latest event / resolved name)
     if state:
-        query = query.where(TaskEvent.event_type == state.lower())
+        query = query.where(windowed.c.event_type == state.lower())
     if name:
-        query = query.where(task_names.c.name == name)
+        query = query.where(windowed.c.task_name == name)
     if search:
-        query = query.where(task_names.c.name.ilike(f"%{search}%"))
+        query = query.where(windowed.c.task_name.ilike(f"%{search}%"))
     if worker:
-        query = query.where(TaskEvent.hostname == worker)
+        query = query.where(windowed.c.hostname == worker)
     if since:
         since_dt = datetime.fromisoformat(since)
-        query = query.where(TaskEvent.timestamp >= since_dt)
+        query = query.where(windowed.c.timestamp >= since_dt)
 
     # Apply ordering
     sort_keys = {
-        "timestamp": TaskEvent.timestamp,
-        "name": task_names.c.name,
-        "state": TaskEvent.event_type,
-        "worker": TaskEvent.hostname,
+        "timestamp": windowed.c.timestamp,
+        "name": windowed.c.task_name,
+        "state": windowed.c.event_type,
+        "worker": windowed.c.hostname,
     }
     if sort_by not in sort_keys:
         return {"error": f"Invalid sort_by: {sort_by}. Must be one of {list(sort_keys)}"}
@@ -150,15 +147,15 @@ async def _list_tasks_impl(
 
     # Format response
     task_list = []
-    for event, task_name in rows:
+    for row in rows:
         task_list.append(
             {
-                "id": str(event.task_id),
-                "name": task_name,
-                "state": event.event_type,
-                "worker": event.hostname,
-                "queue": event.queue,
-                "timestamp": event.timestamp.isoformat(),
+                "id": str(row.task_id),
+                "name": row.task_name,
+                "state": row.event_type,
+                "worker": row.hostname,
+                "queue": row.queue,
+                "timestamp": row.timestamp.isoformat(),
             }
         )
 
@@ -186,32 +183,17 @@ async def list_task_types_query(
 
 async def _list_task_types_impl(session: AsyncSession, limit: int) -> list[dict]:
     """Internal implementation of list_task_types_query."""
-    from sqlalchemy import func as sql_func
-
-    # Task name is only present on the earliest named event per task
-    earliest_named_ts = (
-        select(
-            TaskEvent.task_id,
-            sql_func.min(TaskEvent.timestamp).label("name_ts"),
-        )
-        .where(TaskEvent.name.isnot(None))
-        .group_by(TaskEvent.task_id)
-        .subquery()
-    )
-    task_names = (
-        select(TaskEvent.task_id, TaskEvent.name)
-        .join(
-            earliest_named_ts,
-            (TaskEvent.task_id == earliest_named_ts.c.task_id)
-            & (TaskEvent.timestamp == earliest_named_ts.c.name_ts),
-        )
-        .subquery()
-    )
+    # Task name is only present on the earliest named event per task; resolve it
+    # with a single FIRST_VALUE window pass.
+    latest_rn = _latest_rank(TaskEvent.task_id, TaskEvent.timestamp).label("latest_rn")
+    task_name = _earliest_name_expr().label("task_name")
+    windowed = select(TaskEvent.task_id.label("task_id"), latest_rn, task_name).subquery()
 
     query = (
-        select(task_names.c.name, sql_func.count().label("count"))
-        .group_by(task_names.c.name)
-        .order_by(sql_func.count().desc(), task_names.c.name.asc())
+        select(windowed.c.task_name, func.count().label("count"))
+        .where(windowed.c.latest_rn == 1, windowed.c.task_name.isnot(None))
+        .group_by(windowed.c.task_name)
+        .order_by(func.count().desc(), windowed.c.task_name.asc())
         .limit(limit)
     )
     result = await session.execute(query)
@@ -389,40 +371,27 @@ async def get_task_summary_query(hours: int = 1, session: AsyncSession | None = 
 
 async def _get_task_summary_impl(session: AsyncSession, since: datetime, hours: int) -> dict:
     """Internal implementation of get_task_summary_query."""
-    from sqlalchemy import func as sql_func
+    # Tasks that had any event within the window
+    task_ids_in_window = select(TaskEvent.task_id).where(TaskEvent.timestamp >= since)
 
-    # Get latest event per task within time window using subquery approach
-    # This works with both PostgreSQL and SQLite
-
-    # First, get all task_ids that have events in the time window
-    task_ids_in_window = (
-        select(TaskEvent.task_id).where(TaskEvent.timestamp >= since).distinct().subquery()
-    )
-
-    # Get max timestamp per task within the time window
-    max_timestamps = (
+    # Latest event per task, restricted to the active task set, in one window pass
+    latest_rn = _latest_rank(TaskEvent.task_id, TaskEvent.timestamp).label("latest_rn")
+    windowed = (
         select(
-            TaskEvent.task_id,
-            sql_func.max(TaskEvent.timestamp).label("max_ts"),
+            TaskEvent.task_id.label("task_id"),
+            TaskEvent.event_type.label("event_type"),
+            latest_rn,
         )
-        .where(TaskEvent.task_id.in_(select(task_ids_in_window.c.task_id)))
-        .group_by(TaskEvent.task_id)
+        .where(TaskEvent.task_id.in_(task_ids_in_window))
         .subquery()
     )
 
-    # Get the full event records for the latest events
-    latest_events = (
-        select(TaskEvent)
-        .join(
-            max_timestamps,
-            (TaskEvent.task_id == max_timestamps.c.task_id)
-            & (TaskEvent.timestamp == max_timestamps.c.max_ts),
-        )
-        .subquery()
+    # Count by event_type (state) of the latest event per active task
+    query = (
+        select(windowed.c.event_type, func.count())
+        .where(windowed.c.latest_rn == 1)
+        .group_by(windowed.c.event_type)
     )
-
-    # Count by event_type (state)
-    query = select(latest_events.c.event_type, func.count()).group_by(latest_events.c.event_type)
     result = await session.execute(query)
     state_counts: dict[str, int] = {row[0]: row[1] for row in result.all()}
 
@@ -462,26 +431,21 @@ async def get_worker_status_query(session: AsyncSession | None = None) -> list[d
 
 async def _get_worker_status_impl(session: AsyncSession) -> list[dict]:
     """Internal implementation of get_worker_status_query."""
-    # Get latest event per worker using a subquery to find max timestamp per worker
-    # This approach works with both PostgreSQL and SQLite
-    from sqlalchemy import func as sql_func
+    from sqlalchemy.orm import aliased
 
-    # Subquery to get max timestamp per worker
-    max_timestamps = (
-        select(
-            WorkerEvent.hostname,
-            sql_func.max(WorkerEvent.timestamp).label("max_ts"),
+    # Single window pass: latest event per worker (tie-broken by id).
+    rn = (
+        func.row_number()
+        .over(
+            partition_by=WorkerEvent.hostname,
+            order_by=[WorkerEvent.timestamp.desc(), WorkerEvent.id.desc()],
         )
-        .group_by(WorkerEvent.hostname)
-        .subquery()
+        .label("rn")
     )
+    subq = select(WorkerEvent, rn).subquery()
+    latest_worker = aliased(WorkerEvent, subq)
 
-    # Main query to get the full event records
-    query = select(WorkerEvent).join(
-        max_timestamps,
-        (WorkerEvent.hostname == max_timestamps.c.hostname)
-        & (WorkerEvent.timestamp == max_timestamps.c.max_ts),
-    )
+    query = select(latest_worker).where(subq.c.rn == 1)
 
     result = await session.execute(query)
     events = result.scalars().all()
@@ -619,36 +583,42 @@ async def list_orphaned_tasks_query(
 
 async def _list_orphaned_tasks_impl(session: AsyncSession, limit: int) -> list[dict]:
     """Internal implementation of list_orphaned_tasks_query."""
-    from sqlalchemy import func as sql_func
-
     now = datetime.now(UTC)
+    grace = timedelta(seconds=settings.orphan_grace_seconds)
+    offline_timeout = timedelta(seconds=settings.worker_offline_timeout_seconds)
 
-    # Subquery to get max timestamp per task
-    max_timestamps = (
-        select(
-            TaskEvent.task_id,
-            sql_func.max(TaskEvent.timestamp).label("max_ts"),
-        )
-        .group_by(TaskEvent.task_id)
-        .subquery()
-    )
+    # Latest event per task + earliest non-null name, in a single window pass
+    latest_rn = _latest_rank(TaskEvent.task_id, TaskEvent.timestamp).label("latest_rn")
+    task_name = _earliest_name_expr().label("task_name")
+    windowed = select(
+        TaskEvent.task_id.label("task_id"),
+        TaskEvent.event_type.label("event_type"),
+        TaskEvent.hostname.label("hostname"),
+        TaskEvent.queue.label("queue"),
+        TaskEvent.timestamp.label("timestamp"),
+        latest_rn,
+        task_name,
+    ).subquery()
+    result = await session.execute(select(windowed).where(windowed.c.latest_rn == 1))
+    latest_events = result.all()
 
-    # Get the latest event per task
-    latest_events_query = select(TaskEvent).join(
-        max_timestamps,
-        (TaskEvent.task_id == max_timestamps.c.task_id)
-        & (TaskEvent.timestamp == max_timestamps.c.max_ts),
-    )
-    result = await session.execute(latest_events_query)
-    latest_events = result.scalars().all()
+    # Batch the worker-offline lookup into one query instead of one per task
+    worker_offline = await _workers_offline_map(session, now, offline_timeout)
 
     orphaned_tasks = []
     for event in latest_events:
-        if await _task_is_orphaned_impl(session, event.task_id, event, now):
+        if event.event_type != "started":
+            continue
+        event_ts = _ensure_utc(event.timestamp)
+        if now - event_ts <= grace:
+            continue
+        if not event.hostname:
+            continue
+        if worker_offline.get(event.hostname, True):
             orphaned_tasks.append(
                 {
                     "id": str(event.task_id),
-                    "name": event.name,
+                    "name": event.task_name,
                     "state": "orphaned",
                     "worker": event.hostname,
                     "queue": event.queue,
@@ -656,45 +626,42 @@ async def _list_orphaned_tasks_impl(session: AsyncSession, limit: int) -> list[d
                 }
             )
 
-    # Reconstruct the task name from the earliest named event (the latest
-    # event of an orphan is 'started', which does not carry the name)
-    if orphaned_tasks:
-        task_ids = [t["id"] for t in orphaned_tasks if t["id"] is not None]
-        names = await _task_names_map(session, task_ids)
-        for task in orphaned_tasks:
-            task["name"] = names.get(task["id"])
-
     return orphaned_tasks[:limit]
 
 
-async def _task_names_map(session: AsyncSession, task_ids: list[str]) -> dict[str, str | None]:
-    """Return {task_id: name} using each task's earliest named event.
+async def _workers_offline_map(
+    session: AsyncSession,
+    now: datetime,
+    offline_timeout: timedelta,
+) -> dict[str, bool]:
+    """Return {hostname: is_offline} for every worker, in a single query.
 
-    The task name is only present on 'sent'/'received' events, so the latest
-    event (e.g. 'succeeded', 'started') usually does not carry it. This maps
-    each task id to the name found on its earliest event that has one.
+    A worker is offline if its latest event is 'offline', its heartbeat is
+    stale, or it has no events at all (absent from the map -> treated offline).
     """
-    from sqlalchemy import func as sql_func
+    rn = (
+        func.row_number()
+        .over(
+            partition_by=WorkerEvent.hostname,
+            order_by=[WorkerEvent.timestamp.desc(), WorkerEvent.id.desc()],
+        )
+        .label("rn")
+    )
+    subq = select(
+        WorkerEvent.hostname, WorkerEvent.event_type, WorkerEvent.timestamp, rn
+    ).subquery()
+    result = await session.execute(
+        select(subq.c.hostname, subq.c.event_type, subq.c.timestamp).where(subq.c.rn == 1)
+    )
 
-    earliest_named_ts = (
-        select(
-            TaskEvent.task_id,
-            sql_func.min(TaskEvent.timestamp).label("name_ts"),
-        )
-        .where(
-            TaskEvent.task_id.in_([uuid.UUID(t) for t in task_ids]),
-            TaskEvent.name.isnot(None),
-        )
-        .group_by(TaskEvent.task_id)
-        .subquery()
-    )
-    query = select(TaskEvent.task_id, TaskEvent.name).join(
-        earliest_named_ts,
-        (TaskEvent.task_id == earliest_named_ts.c.task_id)
-        & (TaskEvent.timestamp == earliest_named_ts.c.name_ts),
-    )
-    result = await session.execute(query)
-    return {str(task_id): name for task_id, name in result.all()}
+    offline_map: dict[str, bool] = {}
+    for hostname, event_type, timestamp in result.all():
+        if event_type == "offline":
+            offline_map[hostname] = True
+        else:
+            ts = _ensure_utc(timestamp)
+            offline_map[hostname] = now - ts > offline_timeout
+    return offline_map
 
 
 async def get_task_chain_query(task_id: str, session: AsyncSession | None = None) -> dict:
@@ -738,50 +705,56 @@ async def _get_task_chain_impl(session: AsyncSession, task_uuid: uuid.UUID, task
         # No root recorded; the task is its own chain (or we can't find it)
         root_id = task_uuid
 
-    # Find all tasks in the retry family sharing this root,
-    # always including the queried task itself (even if it has no root_id)
+    # Every event in the retry family sharing this root, always including the
+    # queried task itself (even if it has no root_id). Two window ranks resolve
+    # both the first and latest event per task in a single scan.
+    first_rn = (
+        func.row_number()
+        .over(
+            partition_by=TaskEvent.task_id,
+            order_by=[TaskEvent.timestamp.asc(), TaskEvent.id.asc()],
+        )
+        .label("first_rn")
+    )
+    latest_rn = (
+        func.row_number()
+        .over(
+            partition_by=TaskEvent.task_id,
+            order_by=[TaskEvent.timestamp.desc(), TaskEvent.id.desc()],
+        )
+        .label("latest_rn")
+    )
     family = (
         select(
-            TaskEvent.task_id,
-            func.min(TaskEvent.timestamp).label("first_ts"),
+            TaskEvent.task_id.label("task_id"),
+            TaskEvent.parent_id.label("parent_id"),
+            TaskEvent.event_type.label("event_type"),
+            TaskEvent.timestamp.label("timestamp"),
+            TaskEvent.runtime.label("runtime"),
+            first_rn,
+            latest_rn,
         )
         .where((TaskEvent.root_id == root_id) | (TaskEvent.task_id == task_uuid))
-        .group_by(TaskEvent.task_id)
         .subquery()
     )
 
-    # Get the latest event per task in the family
-    max_timestamps = (
-        select(
-            TaskEvent.task_id,
-            func.max(TaskEvent.timestamp).label("max_ts"),
-        )
-        .where(TaskEvent.task_id.in_(select(family.c.task_id)))
-        .group_by(TaskEvent.task_id)
-        .subquery()
-    )
-    latest_events_query = select(TaskEvent).join(
-        max_timestamps,
-        (TaskEvent.task_id == max_timestamps.c.task_id)
-        & (TaskEvent.timestamp == max_timestamps.c.max_ts),
-    )
-    result = await session.execute(latest_events_query)
-    latest_events = result.scalars().all()
-
-    # Build the chain nodes
+    # Build the chain nodes from each task's latest event
+    result = await session.execute(select(family).where(family.c.latest_rn == 1))
     chain_map: dict[uuid.UUID, dict] = {}
-    for event in latest_events:
-        chain_map[event.task_id] = {
-            "task_id": str(event.task_id),
-            "parent_id": str(event.parent_id) if event.parent_id else None,
-            "state": event.event_type,
-            "started_at": event.timestamp.isoformat(),
-            "runtime": event.runtime,
+    for row in result.all():
+        chain_map[row.task_id] = {
+            "task_id": str(row.task_id),
+            "parent_id": str(row.parent_id) if row.parent_id else None,
+            "state": row.event_type,
+            "started_at": row.timestamp.isoformat(),
+            "runtime": row.runtime,
         }
 
     # Order by the first event timestamp in the family
     result = await session.execute(
-        select(family.c.task_id, family.c.first_ts).order_by(family.c.first_ts)
+        select(family.c.task_id, family.c.timestamp)
+        .where(family.c.first_rn == 1)
+        .order_by(family.c.timestamp)
     )
     ordered_ids = [row[0] for row in result.all()]
 

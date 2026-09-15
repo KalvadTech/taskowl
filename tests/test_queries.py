@@ -830,3 +830,164 @@ async def test_task_chain_invalid_uuid(db_session: AsyncSession):
     """Invalid UUID should return an error."""
     result = await get_task_chain_query("not-a-uuid", session=db_session)
     assert "error" in result
+
+
+# Window-function rewrite regression tests
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_same_timestamp_no_duplicates(db_session: AsyncSession):
+    """Two events for one task at the same timestamp must yield one row."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="same_ts_task",
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="started",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+        )
+    )
+    await db_session.commit()
+
+    result = await list_tasks_query(session=db_session)
+
+    assert len(result) == 1
+    assert result[0]["id"] == str(task_id)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_same_timestamp_tiebreak_by_id(db_session: AsyncSession):
+    """Same-timestamp events should resolve deterministically (higher id wins)."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    # Insert in order: 'received' first (lower id), 'succeeded' second (higher id)
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="tiebreak_task",
+        )
+    )
+    await db_session.commit()
+    db_session.add(
+        TaskEvent(
+            event_type="succeeded",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+        )
+    )
+    await db_session.commit()
+
+    result = await list_tasks_query(session=db_session)
+
+    assert len(result) == 1
+    assert result[0]["state"] == "succeeded"
+    assert result[0]["name"] == "tiebreak_task"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_name_resolution_from_earliest_named_event(db_session: AsyncSession):
+    """Name should come from the earliest named event, not the latest (unnamed) one."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="myapp.tasks.process",
+        )
+    )
+    await db_session.commit()
+    db_session.add(
+        TaskEvent(
+            event_type="started",
+            task_id=task_id,
+            timestamp=now + timedelta(seconds=1),
+            hostname="worker1@localhost",
+        )
+    )
+    await db_session.commit()
+
+    result = await list_tasks_query(session=db_session)
+
+    assert len(result) == 1
+    # Latest event is 'started' (unnamed), but the resolved name is from 'received'
+    assert result[0]["state"] == "started"
+    assert result[0]["name"] == "myapp.tasks.process"
+
+
+@pytest.mark.asyncio
+async def test_get_task_summary_same_timestamp_no_duplicates(db_session: AsyncSession):
+    """Summary should count each task once even with same-timestamp events."""
+    task_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            name="summary_task",
+        )
+    )
+    db_session.add(
+        TaskEvent(
+            event_type="succeeded",
+            task_id=task_id,
+            timestamp=now,
+            hostname="worker1@localhost",
+            runtime=1.0,
+        )
+    )
+    await db_session.commit()
+
+    result = await get_task_summary_query(hours=1, session=db_session)
+
+    assert result["total_tasks"] == 1
+    assert result["by_state"]["succeeded"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_worker_status_same_timestamp_no_duplicates(db_session: AsyncSession):
+    """Worker status should list each worker once even with same-timestamp events."""
+    now = datetime.now(UTC)
+
+    db_session.add(
+        WorkerEvent(
+            event_type="online",
+            hostname="celery@w1",
+            timestamp=now,
+        )
+    )
+    db_session.add(
+        WorkerEvent(
+            event_type="heartbeat",
+            hostname="celery@w1",
+            timestamp=now,
+        )
+    )
+    await db_session.commit()
+
+    result = await get_worker_status_query(session=db_session)
+
+    assert len(result) == 1
+    assert result[0]["hostname"] == "celery@w1"

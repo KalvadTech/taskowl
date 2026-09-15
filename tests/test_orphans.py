@@ -260,3 +260,87 @@ async def test_multiple_tasks_only_orphaned_returned(db_session: AsyncSession):
     result = await list_orphaned_tasks_query(limit=10, session=db_session)
     assert len(result) == 1
     assert result[0]["id"] == str(orphan_id)
+
+
+@pytest.mark.asyncio
+async def test_orphan_worker_check_is_batched(db_session: AsyncSession):
+    """The worker-offline check must be a single query, not one per task (N+1)."""
+    from sqlalchemy import event
+
+    now = datetime.now(UTC)
+    # Several orphaned tasks all on the same offline worker
+    for _ in range(5):
+        db_session.add(
+            TaskEvent(
+                event_type="started",
+                task_id=uuid.uuid4(),
+                timestamp=now - timedelta(seconds=300),
+                hostname="worker1@localhost",
+            )
+        )
+    db_session.add(
+        WorkerEvent(
+            event_type="offline",
+            hostname="worker1@localhost",
+            timestamp=now - timedelta(seconds=120),
+        )
+    )
+    await db_session.commit()
+
+    query_count = 0
+
+    def _count_queries(conn, cursor, statement, parameters, context, executemany):
+        nonlocal query_count
+        if statement.lstrip().upper().startswith("SELECT"):
+            query_count += 1
+
+    event.listen(db_session.get_bind(), "before_cursor_execute", _count_queries)
+    try:
+        result = await list_orphaned_tasks_query(limit=10, session=db_session)
+    finally:
+        event.remove(db_session.get_bind(), "before_cursor_execute", _count_queries)
+
+    assert len(result) == 5
+    # Windowed latest-events query + batched worker-offline query (no per-task queries)
+    assert query_count == 2
+
+
+@pytest.mark.asyncio
+async def test_orphan_same_timestamp_no_duplicates(db_session: AsyncSession):
+    """Two orphan-candidate events for one task at the same timestamp must yield one row."""
+    now = datetime.now(UTC)
+    task_id = uuid.uuid4()
+
+    db_session.add(
+        TaskEvent(
+            event_type="received",
+            task_id=task_id,
+            timestamp=now - timedelta(seconds=301),
+            hostname="worker1@localhost",
+            name="dup_orphan",
+        )
+    )
+    await db_session.commit()
+    # Two 'started' events at the exact same timestamp — both orphan candidates
+    for _ in range(2):
+        db_session.add(
+            TaskEvent(
+                event_type="started",
+                task_id=task_id,
+                timestamp=now - timedelta(seconds=300),
+                hostname="worker1@localhost",
+            )
+        )
+    db_session.add(
+        WorkerEvent(
+            event_type="offline",
+            hostname="worker1@localhost",
+            timestamp=now - timedelta(seconds=120),
+        )
+    )
+    await db_session.commit()
+
+    result = await list_orphaned_tasks_query(limit=10, session=db_session)
+
+    assert len(result) == 1
+    assert result[0]["id"] == str(task_id)
