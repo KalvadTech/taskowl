@@ -20,8 +20,8 @@ classifiers = [
 ]
 dependencies = [
     "fastapi==0.141.1",
-    "uvicorn==0.52.4",
-    "sqlalchemy==2.0.52",
+    "uvicorn==0.53.0",
+    "sqlalchemy==2.0.54",
     "asyncpg==0.31.0",
     "alembic==1.20.0",
     "celery==5.6.3",
@@ -42,8 +42,8 @@ Documentation = "https://github.com/KalvadTech/taskowl"
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    "ruff==0.16.7",
-    "ty==0.0.80",
+    "ruff==0.16.8",
+    "ty==0.0.82",
     "aiosqlite==0.22.1",
 ]
 docs = [
