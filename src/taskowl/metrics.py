@@ -112,6 +112,8 @@ async def _populate_task_metrics(
         )
     )
     for task_name, runtime in result.all():
+        if runtime is None:
+            continue
         task_duration.labels(task_name).observe(runtime)
 
 
