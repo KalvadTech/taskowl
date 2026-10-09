@@ -1,6 +1,6 @@
 # Setup
 
-taskowl runs as three separate processes that share a PostgreSQL database and a
+TaskOwl runs as three separate processes that share a PostgreSQL database and a
 Celery broker:
 
 - **API** — FastAPI REST server (default port `8000`)

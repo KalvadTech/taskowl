@@ -3,6 +3,11 @@
 Write operations on tasks. All require authentication (`API_KEY`) and follow
 the pattern `actions.py → main.py → mcp/tools.py`.
 
+!!! warning
+    These operations change cluster state — `execute_task` runs any registered
+    task by name, and `revoke` can terminate a running task. See
+    [Security](../security.md) before exposing them.
+
 ## revoke_task
 
 Revoke (cancel) a task. Optionally terminate it if it is currently running.

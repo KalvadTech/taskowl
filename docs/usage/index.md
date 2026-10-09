@@ -1,6 +1,6 @@
 # Usage Guide
 
-This guide walks through everything you can do with taskowl: querying tasks,
+This guide walks through everything you can do with TaskOwl: querying tasks,
 managing workers, inspecting queues, and building workflow automations.
 
 ## Available MCP tools
@@ -39,7 +39,7 @@ Once your MCP client is connected, you can ask:
 
 ## Structure
 
-- [Configuring Celery](celery-app.md) — make taskowl see your tasks and workers
+- [Configuring Celery](celery-app.md) — make TaskOwl see your tasks and workers
 - [MCP Clients](mcp-clients.md) — connect opencode or any MCP client
 - [Tasks](tasks.md) — query tasks, filters, timelines, chains, summaries, orphans
 - [Task Actions](task-actions.md) — revoke, retry, execute

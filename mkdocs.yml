@@ -1,4 +1,4 @@
-site_name: taskowl
+site_name: TaskOwl
 site_description: Modern Celery task monitoring with MCP integration
 site_url: https://kalvadtech.github.io/taskowl/
 repo_url: https://github.com/KalvadTech/taskowl
@@ -31,6 +31,7 @@ theme:
     - content.tabs.link
 nav:
   - Overview: index.md
+  - Why TaskOwl?: why-taskowl.md
   - Getting Started:
       - Setup: setup/index.md
       - Installation: setup/installation.md
@@ -46,6 +47,7 @@ nav:
       - Automations: usage/automations.md
       - Metrics: usage/metrics.md
   - Troubleshooting: troubleshooting.md
+  - Security: security.md
   - Contributing: contributing.md
 markdown_extensions:
   - admonition

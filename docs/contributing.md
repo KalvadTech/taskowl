@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in contributing to taskowl!
+Thank you for your interest in contributing to TaskOwl!
 
 ## Development setup
 

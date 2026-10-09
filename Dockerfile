@@ -9,6 +9,7 @@ RUN uv sync --locked --no-dev --no-install-project
 
 COPY README.md ./
 COPY src ./src
+COPY examples ./examples
 RUN uv sync --locked --no-dev
 
 EXPOSE 8000

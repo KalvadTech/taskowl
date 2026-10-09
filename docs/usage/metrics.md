@@ -1,6 +1,6 @@
 # Metrics
 
-taskowl exposes Prometheus metrics at `/metrics` on the API server.
+TaskOwl exposes Prometheus metrics at `/metrics` on the API server.
 
 ```bash
 curl http://localhost:8000/metrics
@@ -27,5 +27,5 @@ scrape_configs:
 
 !!! warning
     `/metrics` is intentionally unauthenticated so Prometheus can scrape it
-    without the taskowl API key. Only expose it to trusted networks or behind a
-    reverse proxy.
+    without the TaskOwl API key. Only expose it to trusted networks or behind a
+    reverse proxy. See [Security](../security.md).

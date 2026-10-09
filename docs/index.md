@@ -1,11 +1,13 @@
-# taskowl
+# TaskOwl
 
 Modern Celery task monitoring with MCP integration. No UI, just data.
 
-taskowl watches your Celery cluster's **event stream**, stores every event in
+TaskOwl watches your Celery cluster's **event stream**, stores every event in
 PostgreSQL as an append-only audit log, and exposes that data — plus task,
 worker, and queue operations — through a REST API and a set of MCP tools for
 LLM-driven monitoring and management.
+
+New here? Start with [Why TaskOwl?](why-taskowl.md).
 
 ## Features
 
@@ -24,12 +26,26 @@ LLM-driven monitoring and management.
 ## Architecture
 
 ```
-Celery workers ──events──▶ Broker ──▶ taskowl consumer ──▶ PostgreSQL
-                                                              │
-                         REST API ◀───────────────────────────┘
-                              ▲
-                              │ HTTP
-                         MCP server ──▶ LLM / MCP client
+Celery workers
+      │
+      │ events
+      ▼
+   Broker
+      │
+      ▼
+ TaskOwl Consumer
+      │
+      ▼
+ PostgreSQL
+      │
+      ├── REST API
+      │
+      ├── Prometheus
+      │
+      └── MCP
+            │
+            ▼
+       AI assistant
 ```
 
 - **Consumer** (separate process) captures Celery events and appends them to
@@ -39,9 +55,13 @@ Celery workers ──events──▶ Broker ──▶ taskowl consumer ──▶
 
 ## Get started
 
-Jump into the [Installation](setup/installation.md) guide to run taskowl, or head
+Jump into the [Installation](setup/installation.md) guide to run TaskOwl, or head
 straight to the [Usage Guide](usage/index.md) for the MCP tools and REST API.
 
 !!! note
-    taskowl only sees what your Celery workers emit. Make sure
-    [events are enabled](usage/celery-app.md) — otherwise taskowl sees nothing.
+    TaskOwl only sees what your Celery workers emit. Make sure
+    [events are enabled](usage/celery-app.md) — otherwise TaskOwl sees nothing.
+
+!!! warning
+    TaskOwl can operate your cluster, not just observe it. Read the
+    [Security](security.md) page before exposing it to a network.
