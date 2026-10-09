@@ -23,7 +23,7 @@ All configuration is via environment variables.
 
 ## Brokers
 
-taskowl works with any Celery/kombu broker via `CELERY_BROKER_URL`:
+TaskOwl works with any Celery/kombu broker via `CELERY_BROKER_URL`:
 
 ```bash
 export CELERY_BROKER_URL="amqp://guest:guest@localhost:5672//"   # RabbitMQ / LavinMQ

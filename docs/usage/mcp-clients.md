@@ -22,5 +22,6 @@ Add a remote MCP server to your `opencode.json`:
 ## Other MCP clients
 
 Point your MCP client at the Streamable HTTP endpoint `http://localhost:8001/mcp`.
-If authentication is enabled, send the taskowl API key as
-`Authorization: Bearer <key>` with each request.
+If authentication is enabled, send the TaskOwl API key as
+`Authorization: Bearer <key>` with each request. See [Security](../security.md)
+for how authentication is enforced.

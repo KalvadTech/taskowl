@@ -1,7 +1,7 @@
 # Configuring your Celery app
 
-taskowl listens to Celery's **events** stream, which workers emit only if
-enabled. Add this to your Celery application so taskowl can see your tasks and
+TaskOwl listens to Celery's **events** stream, which workers emit only if
+enabled. Add this to your Celery application so TaskOwl can see your tasks and
 workers:
 
 ```python
@@ -29,5 +29,5 @@ celery -A myapp worker -E --loglevel=info
 ```
 
 !!! note
-    If events are not enabled, taskowl simply sees nothing — no tasks, no
+    If events are not enabled, TaskOwl simply sees nothing — no tasks, no
     workers. Enabling events is the one integration required.
