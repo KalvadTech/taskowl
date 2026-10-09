@@ -13,7 +13,7 @@ managing workers, inspecting queues, and building workflow automations.
 | **Queues** | `list_queues` |
 | **Automations** | `list_automations`, `create_automation`, `get_automation`, `update_automation`, `delete_automation`, `toggle_automation`, `get_automation_runs`, `get_automation_status` |
 
-**Total: 28 tools** — every tool thin-wraps a REST API endpoint, so anything you
+**Total: 28 tools.** Every tool thin-wraps a REST API endpoint, so anything you
 can do via MCP you can also do with `curl` against the API.
 
 ## Example questions
@@ -39,11 +39,11 @@ Once your MCP client is connected, you can ask:
 
 ## Structure
 
-- [Configuring Celery](celery-app.md) — make TaskOwl see your tasks and workers
-- [MCP Clients](mcp-clients.md) — connect opencode or any MCP client
-- [Tasks](tasks.md) — query tasks, filters, timelines, chains, summaries, orphans
-- [Task Actions](task-actions.md) — revoke, retry, execute
-- [Workers](workers.md) — status, stats, scale, restart, shutdown, scheduled/reserved
-- [Queues](queues.md) — broker queue lengths and consumer counts
-- [Automations](automations.md) — declarative trigger → conditions → actions engine
-- [Metrics](metrics.md) — Prometheus telemetry
+- [Configuring Celery](celery-app.md) - make TaskOwl see your tasks and workers
+- [MCP Clients](mcp-clients.md) - connect opencode or any MCP client
+- [Tasks](tasks.md) - query tasks, filters, timelines, chains, summaries, orphans
+- [Task Actions](task-actions.md) - revoke, retry, execute
+- [Workers](workers.md) - status, stats, scale, restart, shutdown, scheduled/reserved
+- [Queues](queues.md) - broker queue lengths and consumer counts
+- [Automations](automations.md) - declarative trigger → conditions → actions engine
+- [Metrics](metrics.md) - Prometheus telemetry

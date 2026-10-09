@@ -29,5 +29,5 @@ celery -A myapp worker -E --loglevel=info
 ```
 
 !!! note
-    If events are not enabled, TaskOwl simply sees nothing — no tasks, no
+    If events are not enabled, TaskOwl simply sees nothing, no tasks, no
     workers. Enabling events is the one integration required.

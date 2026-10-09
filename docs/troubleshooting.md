@@ -2,7 +2,7 @@
 
 ## Worker not appearing / no events in the database
 
-1. Verify workers emit events — start with `-E` or set `worker_send_task_events`.
+1. Verify workers emit events: start with `-E` or set `worker_send_task_events`.
 2. Check the consumer connected:
 
    ```bash

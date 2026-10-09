@@ -3,8 +3,8 @@
 Modern Celery task monitoring with MCP integration. No UI, just data.
 
 TaskOwl watches your Celery cluster's **event stream**, stores every event in
-PostgreSQL as an append-only audit log, and exposes that data — plus task,
-worker, and queue operations — through a REST API and a set of MCP tools for
+PostgreSQL as an append-only audit log, and exposes that data (plus task,
+worker, and queue operations) through a REST API and a set of MCP tools for
 LLM-driven monitoring and management.
 
 New here? Start with [Why TaskOwl?](why-taskowl.md).
@@ -60,7 +60,7 @@ straight to the [Usage Guide](usage/index.md) for the MCP tools and REST API.
 
 !!! note
     TaskOwl only sees what your Celery workers emit. Make sure
-    [events are enabled](usage/celery-app.md) — otherwise TaskOwl sees nothing.
+    [events are enabled](usage/celery-app.md), otherwise TaskOwl sees nothing.
 
 !!! warning
     TaskOwl can operate your cluster, not just observe it. Read the

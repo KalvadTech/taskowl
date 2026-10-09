@@ -4,7 +4,7 @@ Write operations on tasks. All require authentication (`API_KEY`) and follow
 the pattern `actions.py → main.py → mcp/tools.py`.
 
 !!! warning
-    These operations change cluster state — `execute_task` runs any registered
+    These operations change cluster state: `execute_task` runs any registered
     task by name, and `revoke` can terminate a running task. See
     [Security](../security.md) before exposing them.
 
@@ -35,7 +35,7 @@ curl -X POST -H "Authorization: Bearer $API_KEY" \
 
 ## execute_task
 
-Execute a task by name — the Flower "send-task" equivalent. You provide the task
+Execute a task by name - the Flower "send-task" equivalent. You provide the task
 name, args, kwargs, and scheduling options directly; no prior task is needed.
 
 | Parameter | Description |
@@ -57,5 +57,5 @@ curl -X POST -H "Authorization: Bearer $API_KEY" \
 ```
 
 !!! note
-    `execute_task` does not check task registration — the worker surfaces a
+    `execute_task` does not check task registration: the worker surfaces a
     `NotRegistered` error if the name is unknown.

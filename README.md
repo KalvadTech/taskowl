@@ -44,7 +44,7 @@ Celery workers
 
 TaskOwl subscribes to Celery's events, appends every one to PostgreSQL as an
 append-only log, and reconstructs current task, worker, and queue state from it.
-The REST API and the MCP server are thin interfaces over that same data — so
+The REST API and the MCP server are thin interfaces over that same data, so
 scripts, automations, and AI agents all get the same capabilities.
 
 It is **not** another Flower. No dashboard to click through; instead, durable
@@ -193,19 +193,19 @@ Or start your worker with `-E`:
 celery -A myapp worker -E --loglevel=info
 ```
 
-> **Note**: If events are not enabled, TaskOwl simply sees nothing — no tasks,
+> **Note**: If events are not enabled, TaskOwl simply sees nothing, no tasks,
 > no workers.
 
 ## Documentation
 
-The full documentation lives on [GitHub Pages](https://kalvadtech.github.io/taskowl/) —
+The full documentation lives on [GitHub Pages](https://kalvadtech.github.io/taskowl/):
 setup, configuration, a complete usage guide, security, and troubleshooting.
 
 ## Security
 
 TaskOwl can **operate** your cluster, not just observe it: execute tasks, revoke
 tasks, restart pools, and shut down workers. Authentication is optional and off
-by default — set `API_KEY` before exposing it to any network. See the
+by default; set `API_KEY` before exposing it to any network. See the
 [Security](https://kalvadtech.github.io/taskowl/security/) page.
 
 ## Contributing
@@ -215,9 +215,9 @@ testing, and the pull request process.
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- [Flower](https://github.com/mher/flower) — the original Celery monitor
-- [Kanchi](https://github.com/getkanchi/kanchi) — modern Celery monitoring inspiration
+- [Flower](https://github.com/mher/flower) - the original Celery monitor
+- [Kanchi](https://github.com/getkanchi/kanchi) - modern Celery monitoring inspiration

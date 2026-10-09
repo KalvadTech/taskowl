@@ -17,8 +17,8 @@ The API is on `http://localhost:8000`, the MCP server on
 
 ### Try it with the bundled demo
 
-To also start a demo Celery worker and a task producer — so there is activity to
-query immediately — use the `demo` profile:
+To also start a demo Celery worker and a task producer (so there is activity to
+query immediately), use the `demo` profile:
 
 ```bash
 docker compose --profile demo up --build
@@ -82,9 +82,9 @@ make mcp       # MCP server on :8001
    # {"status":"ok"}
    ```
 
-3. Make sure your [Celery app emits events](../usage/celery-app.md) — without them
+3. Make sure your [Celery app emits events](../usage/celery-app.md). Without them
    TaskOwl sees nothing.
 
 !!! warning
     TaskOwl can operate your cluster, not just observe it. Set `API_KEY` before
-    exposing it to a network — see [Security](../security.md).
+    exposing it to a network; see [Security](../security.md).

@@ -3,8 +3,8 @@
 Celery gives you workers and tasks. **TaskOwl gives you observability, history,
 control, and an AI interface for the whole cluster.**
 
-Celery's event stream contains a huge amount of useful operational information —
-task states, retries, worker heartbeats, queue activity — but once an event has
+Celery's event stream contains a huge amount of useful operational information
+(task states, retries, worker heartbeats, queue activity) but once an event has
 passed, it is gone. TaskOwl turns that stream into a persistent operational
 history and exposes it through REST and MCP.
 
@@ -101,6 +101,6 @@ are valuable, but they are not this project. **No UI, just data.**
 
 ## Next steps
 
-- [Install TaskOwl](setup/installation.md) — the Docker path takes about five minutes.
-- [Usage Guide](usage/index.md) — the MCP tools and REST API.
-- [Security](security.md) — TaskOwl can operate your cluster, not just observe it.
+- [Install TaskOwl](setup/installation.md) - the Docker path takes about five minutes.
+- [Usage Guide](usage/index.md) - the MCP tools and REST API.
+- [Security](security.md) - TaskOwl can operate your cluster, not just observe it.

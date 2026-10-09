@@ -39,7 +39,7 @@ curl -H "Authorization: Bearer $API_KEY" \
 
 ## get_task_timeline
 
-Get all events for a task in chronological order — the full execution flow
+Get all events for a task in chronological order: the full execution flow
 (sent, received, started, succeeded/failed, ...).
 
 ```bash

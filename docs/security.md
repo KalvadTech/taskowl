@@ -18,9 +18,9 @@ variable. When set, all requests to the REST API and the MCP server must include
 Authorization: Bearer <API_KEY>
 ```
 
-- **REST API** — enforced by the `verify_api_key` dependency
+- **REST API** - enforced by the `verify_api_key` dependency
   (`src/taskowl/auth.py:19`) on every `/api/*` route.
-- **MCP server** — enforced by `AuthMiddleware` (`src/taskowl/auth.py:46`)
+- **MCP server** - enforced by `AuthMiddleware` (`src/taskowl/auth.py:46`)
   before any MCP request is processed.
 
 When `API_KEY` is **unset**, both layers disable themselves and every request is
@@ -39,7 +39,7 @@ Regardless of `API_KEY`, these endpoints are unauthenticated:
 ## Read-only vs destructive operations
 
 Everything under `/api/*` requires the API key. The distinction below is about
-**impact**, not authorization — a leaked key is enough to run any of them.
+**impact**, not authorization, a leaked key is enough to run any of them.
 
 ### Read-only
 
@@ -78,7 +78,7 @@ task the worker knows about. Restrict who holds the key.
 
 TaskOwl's worker controls and task sends go through the Celery broker using
 `app.control` / `app.send_task`. The API key only protects TaskOwl's HTTP and MCP
-interfaces — **anyone with broker access has the same power.** Secure your broker
+interfaces; **anyone with broker access has the same power.** Secure your broker
 (credentials, network, vhost ACLs) independently of TaskOwl.
 
 ## `/metrics` exposure
@@ -92,8 +92,8 @@ network-level or token-based auth.
 
 Automation actions can POST to arbitrary URLs:
 
-- `slack_webhook` — sends to a Slack-compatible `webhook_url`.
-- `webhook` — sends an arbitrary JSON `payload` to a `url`.
+- `slack_webhook` - sends to a Slack-compatible `webhook_url`.
+- `webhook` - sends an arbitrary JSON `payload` to a `url`.
 
 Both support `{event.field}` interpolation resolved at fire time. Treat
 automation definitions like secrets:
@@ -119,7 +119,7 @@ history via `GET /api/automations/{id}/runs`.
 
 ## See also
 
-- [Configuration](setup/configuration.md) — `API_KEY` and related variables.
-- [Task Actions](usage/task-actions.md) — the destructive task operations.
-- [Automations](usage/automations.md) — actions and safety controls.
-- [Metrics](usage/metrics.md) — the unauthenticated metrics endpoint.
+- [Configuration](setup/configuration.md) - `API_KEY` and related variables.
+- [Task Actions](usage/task-actions.md) - the destructive task operations.
+- [Automations](usage/automations.md) - actions and safety controls.
+- [Metrics](usage/metrics.md) - the unauthenticated metrics endpoint.

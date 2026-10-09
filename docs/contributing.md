@@ -15,7 +15,7 @@ running, then continue here.
    git checkout -b feature/your-feature-name
    ```
 
-2. **Make your changes** — follow the existing code style, add tests, update docs.
+2. **Make your changes**: follow the existing code style, add tests, update docs.
 
 3. **Run quality checks**:
 
@@ -36,7 +36,7 @@ Guidelines:
 
 - **Type annotations**: All functions must have type hints.
 - **Async/await**: Use async for I/O operations.
-- **Error handling**: Be explicit about error cases — return `{"error": ...}`
+- **Error handling**: Be explicit about error cases: return `{"error": ...}`
   dicts from core functions, surface them as HTTP 4xx/5xx in the API layer.
 - **Documentation**: Document public APIs with docstrings.
 

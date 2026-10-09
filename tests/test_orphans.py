@@ -321,7 +321,7 @@ async def test_orphan_same_timestamp_no_duplicates(db_session: AsyncSession):
         )
     )
     await db_session.commit()
-    # Two 'started' events at the exact same timestamp — both orphan candidates
+    # Two 'started' events at the exact same timestamp, both orphan candidates
     for _ in range(2):
         db_session.add(
             TaskEvent(

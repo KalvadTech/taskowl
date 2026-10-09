@@ -1,7 +1,7 @@
 # Automations
 
 Automations are declarative **trigger → conditions → actions** definitions that
-drive workflow automation — a superset of the original env-var alerts. They are
+drive workflow automation, a superset of the original env-var alerts. They are
 evaluated by the consumer process, managed via the `/api/automations` endpoints,
 and exposed as the `*_automation` MCP tools.
 
@@ -9,7 +9,7 @@ and exposed as the `*_automation` MCP tools.
 
 When the consumer receives an event, it loads every **enabled** event automation
 whose `event_type` matches, evaluates the automation's `conditions` against the
-event, and — if they all pass — fires its `actions`. Every evaluation is
+event, and (if they all pass) fires its `actions`. Every evaluation is
 recorded in the append-only `automation_runs` log (metadata only; args, kwargs,
 results, and tracebacks are never stored).
 
@@ -71,7 +71,7 @@ paths support dots (e.g. `request.id`). All conditions must pass.
 | `in` | Field is in a list |
 | `exists` | Field is present (non-null) |
 
-Example — only alert for retried failures of one task on the high queue:
+Example: only alert for retried failures of one task on the high queue:
 
 ```json
 {
@@ -93,9 +93,9 @@ Example — only alert for retried failures of one task on the high queue:
 | `retry_task` | `task_id` (defaults to event `uuid`) |
 | `execute_task` | `name`, `args`, `kwargs`, `queue`, `countdown`, `eta`, `expires`, `priority` |
 | `revoke_task` | `task_id` (defaults to event `uuid`), `terminate` |
-| `check_workers_offline` | `webhook_url` — scan for stale workers and alert |
+| `check_workers_offline` | `webhook_url` - scan for stale workers and alert |
 
-Action params support **`{event.field}` interpolation** — the value is resolved
+Action params support **`{event.field}` interpolation**: the value is resolved
 from the triggering event at fire time:
 
 ```json
@@ -110,10 +110,10 @@ from the triggering event at fire time:
 
 Prevent alert/action storms:
 
-- **`cooldown_seconds`** — after firing, wait at least this long before firing again.
-- **`max_runs_per_window` + `window_seconds`** — fire at most `max_runs_per_window`
+- **`cooldown_seconds`** - after firing, wait at least this long before firing again.
+- **`max_runs_per_window` + `window_seconds`** - fire at most `max_runs_per_window`
   times per `window_seconds`.
-- **`circuit_breaker`** — `{"failure_threshold": N, "window_seconds": W}`; skip
+- **`circuit_breaker`** - `{"failure_threshold": N, "window_seconds": W}`; skip
   actions (`circuit_open`) once the automation has fired N times within W
   seconds, and auto-close once the window rolls past.
 
