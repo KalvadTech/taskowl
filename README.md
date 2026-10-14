@@ -128,6 +128,12 @@ The demo producer continuously creates tasks (including some that fail), so you
 can start asking questions immediately. For just the infrastructure without the
 demo workload, run `docker compose up --build`.
 
+A prebuilt image is also published to GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/kalvadtech/taskowl:0.1.0
+```
+
 ### Connect an MCP client
 
 The MCP server runs on `http://localhost:8001/mcp` (Streamable HTTP). For

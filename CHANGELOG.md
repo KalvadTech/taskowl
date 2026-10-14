@@ -29,5 +29,5 @@ Initial release.
 - Docker Compose setup with an optional `demo` profile and a bundled demo
   Celery workload.
 
-[Unreleased]: https://github.com/KalvadTech/taskowl/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/KalvadTech/taskowl/releases/tag/v0.1.0
+[Unreleased]: https://github.com/KalvadTech/taskowl/compare/0.1.0...HEAD
+[0.1.0]: https://github.com/KalvadTech/taskowl/releases/tag/0.1.0
