@@ -4,9 +4,17 @@ on:
   push:
     tags: ["[0-9]*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, without a leading v (e.g. 0.1.0)."
+        required: true
+        type: string
 
 permissions:
   contents: read
+
+env:
+  VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
   pypi:
@@ -50,14 +58,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute image tags
+        id: tags
+        run: |
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "minor=${VERSION%.*}" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ steps.tags.outputs.version }}
+            type=raw,value=${{ steps.tags.outputs.minor }}
             type=raw,value=latest
 
       - name: Build and push
