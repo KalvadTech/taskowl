@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 app = FastAPI(
     title="taskowl",
     description="Modern Celery task monitoring with MCP integration",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -124,7 +124,7 @@ async def root() -> dict[str, str]:
     """Root endpoint."""
     return {
         "name": "taskowl",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "description": "Modern Celery task monitoring with MCP integration",
         "docs": "/docs",
     }

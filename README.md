@@ -132,7 +132,7 @@ demo workload, run `docker compose up --build`.
 A prebuilt image is also published to GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/kalvadtech/taskowl:0.1.0
+docker pull ghcr.io/kalvadtech/taskowl:0.2.0
 ```
 
 ### Connect an MCP client

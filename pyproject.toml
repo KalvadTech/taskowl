@@ -1,6 +1,6 @@
 [project]
 name = "taskowl"
-version = "0.1.0"
+version = "0.2.0"
 description = "Modern Celery task monitoring with MCP integration"
 readme = "README.md"
 requires-python = ">=3.14"
