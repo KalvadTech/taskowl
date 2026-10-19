@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from taskowl.consumer.handlers import (
@@ -330,3 +330,57 @@ async def test_handle_worker_offline(db_session: AsyncSession):
 
     assert worker_event.event_type == "offline"
     assert worker_event.hostname == "worker1@localhost"
+
+
+@pytest.mark.asyncio
+async def test_handle_task_received_is_idempotent(db_session: AsyncSession):
+    """Replaying the same task event must not create a duplicate row."""
+    task_id = uuid.uuid4()
+    event = {
+        "uuid": str(task_id),
+        "timestamp": datetime.now(UTC).timestamp(),
+        "hostname": "worker1@localhost",
+        "name": "test_task",
+        "queue": "default",
+    }
+
+    await handle_task_received(event, db_session)
+    await handle_task_received(event, db_session)
+
+    count = (await db_session.execute(select(func.count()).select_from(TaskEvent))).scalar_one()
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_handle_worker_heartbeat_is_idempotent(db_session: AsyncSession):
+    """Replaying the same worker event must not create a duplicate row."""
+    event = {
+        "hostname": "worker1@localhost",
+        "timestamp": datetime.now(UTC).timestamp(),
+        "active": 2,
+        "processed": 100,
+        "freq": 2.0,
+    }
+
+    await handle_worker_heartbeat(event, db_session)
+    await handle_worker_heartbeat(event, db_session)
+
+    count = (await db_session.execute(select(func.count()).select_from(WorkerEvent))).scalar_one()
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_event_without_timestamp_is_not_deduped(db_session: AsyncSession):
+    """Events with no source timestamp get a NULL key and are always inserted."""
+    task_id = uuid.uuid4()
+    event = {
+        "uuid": str(task_id),
+        "hostname": "worker1@localhost",
+        "name": "test_task",
+    }
+
+    await handle_task_received(event, db_session)
+    await handle_task_received(event, db_session)
+
+    count = (await db_session.execute(select(func.count()).select_from(TaskEvent))).scalar_one()
+    assert count == 2

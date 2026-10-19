@@ -126,3 +126,16 @@ async def test_task_event_timeline(db_session):
     assert events[2].event_type == "succeeded"
     assert events[2].runtime == 1.5
     assert events[2].result == {"status": "ok"}
+
+
+def test_dedupe_key_column_and_index():
+    """Both event tables expose a nullable dedupe_key with a unique index."""
+    assert "dedupe_key" in TaskEvent.__table__.columns
+    assert "dedupe_key" in WorkerEvent.__table__.columns
+    assert TaskEvent.__table__.c.dedupe_key.nullable is True
+    assert WorkerEvent.__table__.c.dedupe_key.nullable is True
+
+    task_indexes = {index.name for index in TaskEvent.__table__.indexes}
+    worker_indexes = {index.name for index in WorkerEvent.__table__.indexes}
+    assert "uq_task_events_dedupe_key" in task_indexes
+    assert "uq_worker_events_dedupe_key" in worker_indexes

@@ -20,6 +20,17 @@ All configuration is via environment variables.
 | `ALERT_SLOW_TASK_SECONDS` | Alert when a succeeded task exceeds this runtime | None | No |
 | `ALERT_WORKER_CHECK_SECONDS` | Interval for the periodic stale-worker check | `30` | No |
 | `AUTOMATION_CHECK_SECONDS` | Interval for the periodic automation evaluation loop | `5` | No |
+| `EVENT_RETENTION_DAYS` | Delete `task_events`/`worker_events` older than this many days (`0` = keep forever) | `0` | No |
+| `AUTOMATION_RUN_RETENTION_DAYS` | Delete `automation_runs` older than this many days (`0` = keep forever) | `0` | No |
+| `RETENTION_CHECK_SECONDS` | Interval for the consumer's periodic prune loop | `3600` | No |
+| `RETENTION_BATCH_SIZE` | Rows deleted per batch when pruning | `10000` | No |
+
+## Retention
+
+The event log is append-only and grows without bound by default. Set
+`EVENT_RETENTION_DAYS` (and optionally `AUTOMATION_RUN_RETENTION_DAYS`) to have
+the consumer periodically delete rows older than the window, or run
+`taskowl-prune` on demand. See [Retention](../usage/retention.md) for details.
 
 ## Brokers
 

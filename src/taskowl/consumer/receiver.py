@@ -21,6 +21,7 @@ from taskowl.consumer.handlers import (
     WORKER_EVENT_HANDLERS,
 )
 from taskowl.database import async_session_maker
+from taskowl.maintenance import run_prune
 from taskowl.workflow import WorkflowEngine
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ class CeleryEventConsumer:
         self.connection: Connection | None = None
         self.recv: EventReceiver | None = None
         self._automation_task: asyncio.Task | None = None
+        self._retention_task: asyncio.Task | None = None
         self.workflow_engine = WorkflowEngine()
 
     def _create_handlers(self) -> dict[str, Any]:
@@ -172,6 +174,9 @@ class CeleryEventConsumer:
         # Start periodic automation evaluation loop (no-op if no periodic automations)
         self._automation_task = asyncio.create_task(self._periodic_automation_check())
 
+        # Start periodic retention/prune loop (no-op if retention is disabled)
+        self._retention_task = asyncio.create_task(self._periodic_retention())
+
         # Run event capture in thread pool to avoid blocking
         await asyncio.to_thread(self._capture_events)
 
@@ -180,6 +185,10 @@ class CeleryEventConsumer:
             self._automation_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._automation_task
+        if self._retention_task:
+            self._retention_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._retention_task
 
         logger.info("Celery event consumer stopped")
 
@@ -191,6 +200,22 @@ class CeleryEventConsumer:
                 await self.workflow_engine.evaluate_periodic()
             except Exception:
                 logger.exception("Error in periodic automation check")
+            await asyncio.sleep(interval)
+
+    async def _periodic_retention(self) -> None:
+        """Periodically prune event tables according to the retention config."""
+        if settings.event_retention_days <= 0 and settings.automation_run_retention_days <= 0:
+            logger.info("Event retention disabled; periodic pruning will not run")
+            return
+
+        interval = settings.retention_check_seconds
+        while True:
+            try:
+                counts = await run_prune()
+                if any(counts.values()):
+                    logger.info("Retention prune removed rows: %s", counts)
+            except Exception:
+                logger.exception("Error in periodic retention prune")
             await asyncio.sleep(interval)
 
     async def stop(self) -> None:

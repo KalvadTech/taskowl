@@ -47,10 +47,16 @@ class TaskEvent(Base):
         nullable=False,
     )
 
+    # Deterministic idempotency key used to drop broker redeliveries/replays.
+    # Nullable so historical rows and timestamp-less events never collide
+    # (a unique index allows multiple NULLs on both PostgreSQL and SQLite).
+    dedupe_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     __table_args__ = (
         Index("idx_task_events_task_id_timestamp", "task_id", "timestamp"),
         Index("idx_task_events_event_type_timestamp", "event_type", "timestamp"),
         Index("idx_task_events_timestamp", "timestamp"),
+        Index("uq_task_events_dedupe_key", "dedupe_key", unique=True),
     )
 
 
@@ -78,10 +84,14 @@ class WorkerEvent(Base):
         nullable=False,
     )
 
+    # Deterministic idempotency key (see TaskEvent.dedupe_key).
+    dedupe_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     __table_args__ = (
         Index("idx_worker_events_hostname_timestamp", "hostname", "timestamp"),
         Index("idx_worker_events_event_type_timestamp", "event_type", "timestamp"),
         Index("idx_worker_events_timestamp", "timestamp"),
+        Index("uq_worker_events_dedupe_key", "dedupe_key", unique=True),
     )
 
 
