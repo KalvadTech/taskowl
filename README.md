@@ -100,6 +100,7 @@ TaskOwl: Pool restarted on celery@worker1.
   webhooks, retry orchestration, cooldowns, rate limits, and circuit breakers
 - **Prometheus metrics**: Scrape task, worker, and automation telemetry via `/metrics`
 - **PostgreSQL backend**: Production-ready, async throughout
+- **Configurable retention**: Bound event-log growth with automatic pruning
 - **Broker-agnostic**: RabbitMQ, LavinMQ, Redis, or any Celery/kombu broker
 
 ## Quick Start

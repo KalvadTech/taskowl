@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Idempotent event ingest: `task_events` and `worker_events` now carry a
+  deterministic `dedupe_key` and are written with `INSERT ... ON CONFLICT DO
+  NOTHING`, so broker redeliveries and consumer replays no longer create
+  duplicate rows. Events emitted without a timestamp keep a NULL key and are
+  always inserted.
+- Configurable retention for the append-only event log via
+  `EVENT_RETENTION_DAYS`, `AUTOMATION_RUN_RETENTION_DAYS`,
+  `RETENTION_CHECK_SECONDS`, and `RETENTION_BATCH_SIZE`. Pruning runs in the
+  consumer and deletes expired rows in bounded batches; default is to keep
+  everything.
+- New `taskowl-prune` CLI for one-off or cron-based pruning, with `--dry-run`
+  and a `--days` override.
+
 ## [0.1.0] - 2026-10-09
 
 Initial release.

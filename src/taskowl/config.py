@@ -73,6 +73,26 @@ class Settings(BaseSettings):
         description="Interval for the periodic automation evaluation loop",
     )
 
+    # Retention (event log pruning). 0 disables pruning and keeps everything.
+    event_retention_days: int = Field(
+        default=0,
+        description=(
+            "Delete task_events and worker_events older than this many days (0 = keep forever)"
+        ),
+    )
+    automation_run_retention_days: int = Field(
+        default=0,
+        description="Delete automation_runs older than this many days (0 = keep forever)",
+    )
+    retention_check_seconds: int = Field(
+        default=3600,
+        description="Interval for the consumer's periodic retention/prune loop",
+    )
+    retention_batch_size: int = Field(
+        default=10000,
+        description="Number of rows deleted per batch during retention pruning",
+    )
+
     model_config = {"env_prefix": "", "case_sensitive": False}
 
 

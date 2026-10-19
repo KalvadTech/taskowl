@@ -47,3 +47,4 @@ Once your MCP client is connected, you can ask:
 - [Queues](queues.md) - broker queue lengths and consumer counts
 - [Automations](automations.md) - declarative trigger → conditions → actions engine
 - [Metrics](metrics.md) - Prometheus telemetry
+- [Retention](retention.md) - bound event-log growth and prune old rows

@@ -46,6 +46,7 @@ nav:
       - Queues: usage/queues.md
       - Automations: usage/automations.md
       - Metrics: usage/metrics.md
+      - Retention: usage/retention.md
   - Troubleshooting: troubleshooting.md
   - Security: security.md
   - Contributing: contributing.md
