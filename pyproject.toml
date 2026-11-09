@@ -19,14 +19,14 @@ classifiers = [
     "Topic :: System :: Monitoring",
 ]
 dependencies = [
-    "fastapi==0.162.0",
+    "fastapi==0.162.2",
     "uvicorn==0.54.0",
-    "sqlalchemy[asyncio]==2.1.6",
+    "sqlalchemy[asyncio]==2.1.8",
     "asyncpg==0.32.0",
     "alembic==1.20.1",
-    "celery==5.6.3",
+    "celery==5.7.0",
     "mcp==2.3.0",
-    "pydantic==2.14.2",
+    "pydantic==2.14.3",
     "pydantic-settings==2.16.2",
     "redis==8.1.0",
     "prometheus-client==0.26.0",
@@ -44,8 +44,8 @@ Issues = "https://github.com/KalvadTech/taskowl/issues"
 dev = [
     "pytest==9.2.0",
     "pytest-asyncio==1.4.1.post1",
-    "ruff==0.17.3",
-    "ty==0.0.95",
+    "ruff==0.17.4",
+    "ty==0.0.99",
     "aiosqlite==0.22.1",
 ]
 docs = [
